@@ -1,0 +1,142 @@
+services:
+  # =============================================
+  # PostgreSQL 16
+  # =============================================
+  db:
+    image: postgres:16-alpine
+    container_name: elegiscmon-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-elegiscmon}
+      POSTGRES_USER: ${DB_USER:-elegiscmon}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD obrigatorio em producao}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${DB_EXTERNAL_PORT:-5432}:5432"
+    command: >
+      postgres
+        -c max_connections=200
+        -c shared_buffers=256MB
+        -c effective_cache_size=768MB
+        -c work_mem=4MB
+        -c maintenance_work_mem=64MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c min_wal_size=80MB
+        -c max_wal_size=1GB
+        -c log_min_duration_statement=1000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-elegiscmon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - elegiscmon-net
+
+  # =============================================
+  # Redis 7
+  # =============================================
+  redis:
+    image: redis:7-alpine
+    container_name: elegiscmon-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+        --appendonly yes
+        --save 60 1000
+    volumes:
+      - redisdata:/data
+    ports:
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - elegiscmon-net
+
+  # =============================================
+  # Backend (Node.js/Express)
+  # =============================================
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: elegiscmon-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-elegiscmon}
+      DB_USER: ${DB_USER:-elegiscmon}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD obrigatorio em producao}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET obrigatorio em producao}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      BODY_LIMIT: ${BODY_LIMIT:-2mb}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+      - ./docs:/app/docs:ro
+    ports:
+      - "${BACKEND_EXTERNAL_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - elegiscmon-net
+
+  # =============================================
+  # Frontend (Nginx + SPA React)
+  # =============================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elegiscmon-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - elegiscmon-net
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  uploads:
+    driver: local
+
+networks:
+  elegiscmon-net:
+    driver: bridge

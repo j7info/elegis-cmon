@@ -1,0 +1,54 @@
+import React from 'react';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './lib/AuthContext';
+import { AdminLayout } from './components/AdminLayout';
+import { Dashboard } from './pages/Dashboard';
+import { CourseDetail } from './pages/CourseDetail';
+import { ClassDetail } from './pages/ClassDetail';
+import { ScanPage } from './pages/ScanPage';
+import { RegisterClass } from './pages/RegisterClass';
+import { CertificateManager } from './pages/CertificateManager';
+import { ResetPassword } from './pages/ResetPassword';
+import { PrintCertificate } from './pages/PrintCertificate';
+import { AdminSettings } from './pages/AdminSettings';
+import { VerifyCertificate } from './pages/VerifyCertificate';
+
+import { PreRegister } from './pages/PreRegister';
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
+  if (!user) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function Main() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<AdminLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="course/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
+          <Route path="course/:courseId/certificates" element={<ProtectedRoute><CertificateManager /></ProtectedRoute>} />
+          <Route path="class/:classId" element={<ProtectedRoute><ClassDetail /></ProtectedRoute>} />
+        </Route>
+        <Route path="/register/:classId" element={<RegisterClass />} />
+        <Route path="/pre-register" element={<PreRegister />} />
+        <Route path="/s/:classId/:step" element={<ScanPage />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/certificate/:courseId/:studentId" element={<PrintCertificate />} />
+        <Route path="/verify" element={<VerifyCertificate />} />
+        <Route path="/verify/:tokenParam" element={<VerifyCertificate />} />
+      </Routes>
+    </Router>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Main />
+    </AuthProvider>
+  );
+}

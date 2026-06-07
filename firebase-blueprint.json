@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "ClassSession": {
+      "title": "ClassSession",
+      "description": "A class session created by the admin.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "The title or topic of the class" },
+        "date": { "type": "string", "description": "ISO date string" },
+        "ownerId": { "type": "string", "description": "The UID of the admin who created it" },
+        "status": { "type": "string", "enum": ["scheduled", "active", "completed"] },
+        "createdAt": { "type": "number", "description": "Creation timestamp" }
+      },
+      "required": ["title", "date", "ownerId", "status", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "An attendance record for a student in a class.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "role": { "type": "string" },
+        "department": { "type": "string" },
+        "scanStart": { "type": "number" },
+        "scanMiddle": { "type": "number", "description": "Optional middle scan" },
+        "scanEnd": { "type": "number", "description": "Optional end scan" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["fullName", "role", "department", "scanStart", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/ClassSession" },
+      "description": "Stores all class sessions."
+    },
+    "/classes/{classId}/attendances/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "Stores attendance records for a specific class."
+    }
+  }
+}

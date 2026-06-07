@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2 } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -12,12 +12,20 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export function ClassDetail() {
   const { classId } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [classData, setClassData] = useState<any>(null);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [presentationFile, setPresentationFile] = useState<File | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   
+  const [isEditingClass, setIsEditingClass] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [editAuxTeacherId, setEditAuxTeacherId] = useState('');
   const [editingDuration, setEditingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('10');
 
@@ -58,6 +66,59 @@ export function ClassDetail() {
       setClassData(updated);
     } catch (err) {
       console.error('Update class error:', err);
+    }
+  };
+
+  const handleDeleteClass = async () => {
+    if (!window.confirm('Tem certeza que deseja excluir esta aula? Esta ação não pode ser desfeita.')) return;
+    try {
+      await api.delete(`/classes/${classId}`);
+      navigate(`/course/${classData.course_id}`);
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Erro ao excluir aula.');
+    }
+  };
+
+  const openEditModal = async () => {
+    setEditTitle(classData.title || '');
+    setEditDescription(classData.description || '');
+    if (classData.date) {
+      const d = new Date(classData.date);
+      setEditDate(format(d, 'yyyy-MM-dd'));
+      setEditTime(format(d, 'HH:mm'));
+    } else {
+      setEditDate('');
+      setEditTime('');
+    }
+    setEditAuxTeacherId(classData.auxiliary_teacher_id ? String(classData.auxiliary_teacher_id) : '');
+    setIsEditingClass(true);
+    
+    // Load users if empty
+    if (allUsers.length === 0) {
+      try {
+        const usersData = await api.get('/users');
+        setAllUsers(usersData);
+      } catch (err) {}
+    }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTitle.trim()) return;
+    
+    const combinedDate = editDate && editTime ? new Date(`${editDate}T${editTime}`).toISOString() : undefined;
+    
+    try {
+      const updated = await api.put(`/classes/${classId}`, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        date: combinedDate,
+        auxiliary_teacher_id: editAuxTeacherId ? parseInt(editAuxTeacherId) : null,
+      });
+      setClassData(updated);
+      setIsEditingClass(false);
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Erro ao atualizar aula.');
     }
   };
 
@@ -138,6 +199,17 @@ export function ClassDetail() {
         </div>
         <div className="flex gap-3 flex-wrap items-center">
           
+          {classData.status === 'scheduled' && (
+            <div className="flex items-center gap-2 mr-2 border-r border-gray-200 pr-4">
+              <button onClick={openEditModal} className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors" title="Editar Aula">
+                <Pencil className="w-5 h-5" />
+              </button>
+              <button onClick={handleDeleteClass} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir Aula">
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
             <Clock className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-600">Duração QR:</span>
@@ -316,6 +388,89 @@ export function ClassDetail() {
           onActivateQR={activateQRStep}
           classData={classData}
         />
+      )}
+
+      {isEditingClass && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-teal-600" /> Editar Aula
+              </h2>
+              <button onClick={() => setIsEditingClass(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
+                <input 
+                  type="text" 
+                  value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                <textarea 
+                  value={editDescription}
+                  onChange={e => setEditDescription(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-24 resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                  <input 
+                    type="date" 
+                    value={editDate}
+                    onChange={e => setEditDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Hora</label>
+                  <input 
+                    type="time" 
+                    value={editTime}
+                    onChange={e => setEditTime(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Professor Auxiliar (Opcional)</label>
+                <select
+                  value={editAuxTeacherId}
+                  onChange={e => setEditAuxTeacherId(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                >
+                  <option value="">Nenhum</option>
+                  {allUsers.filter(u => u.id !== user?.id).map(u => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-4 flex justify-end gap-3">
+                <button type="button" onClick={() => setIsEditingClass(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={!editTitle.trim()} className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors disabled:opacity-50">
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

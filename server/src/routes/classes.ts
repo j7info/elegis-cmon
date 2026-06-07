@@ -103,7 +103,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // PUT /api/classes/:id — Atualizar aula (status, QR timestamps)
 router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id } = req.body;
+  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id } = req.body;
 
   try {
     const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
@@ -116,6 +116,18 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
     const values: any[] = [];
     let paramIdx = 1;
 
+    if (title !== undefined) {
+      setClauses.push(`title = $${paramIdx++}`);
+      values.push(title.trim());
+    }
+    if (description !== undefined) {
+      setClauses.push(`description = $${paramIdx++}`);
+      values.push(description.trim());
+    }
+    if (date !== undefined) {
+      setClauses.push(`date = $${paramIdx++}`);
+      values.push(date);
+    }
     if (status !== undefined) {
       setClauses.push(`status = $${paramIdx++}`);
       values.push(status);
@@ -158,6 +170,36 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
   } catch (err) {
     console.error('Update class error:', err);
     res.status(500).json({ error: 'Erro ao atualizar aula' });
+  }
+});
+
+// DELETE /api/classes/:id — Excluir aula (apenas se status === 'scheduled')
+router.delete('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
+    // Verifica status da aula
+    const checkRes = await pool.query('SELECT status FROM classes WHERE id = $1', [req.params.id]);
+    if (checkRes.rows.length === 0) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
+    if (checkRes.rows[0].status !== 'scheduled') {
+      res.status(403).json({ error: 'Não é possível excluir uma aula que já foi iniciada ou finalizada.' });
+      return;
+    }
+
+    // Exclui a aula
+    await pool.query('DELETE FROM classes WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete class error:', err);
+    res.status(500).json({ error: 'Erro ao excluir aula' });
   }
 });
 

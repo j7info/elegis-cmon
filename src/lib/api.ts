@@ -46,7 +46,18 @@ class ApiClient {
       // Token expired or invalid
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_user');
-      window.location.hash = '#/';
+      
+      const currentHash = window.location.hash;
+      const isPublicRoute = currentHash.startsWith('#/register/') || 
+                            currentHash.startsWith('#/pre-register') || 
+                            currentHash.startsWith('#/s/') || 
+                            currentHash.startsWith('#/verify') || 
+                            currentHash.startsWith('#/reset-password');
+      
+      if (!isPublicRoute) {
+        window.location.hash = '#/';
+      }
+      
       throw new Error('Sessão expirada. Faça login novamente.');
     }
 

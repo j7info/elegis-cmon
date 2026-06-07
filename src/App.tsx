@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { AdminLayout } from './components/AdminLayout';
 import { Dashboard } from './pages/Dashboard';
@@ -17,8 +17,10 @@ import { PreRegister } from './pages/PreRegister';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
   if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
-  if (!user) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to="/" state={{ from: location.pathname }} replace />;
   return <>{children}</>;
 }
 

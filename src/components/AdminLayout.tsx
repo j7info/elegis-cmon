@@ -1,17 +1,26 @@
 import React, { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { Outlet, Link } from 'react-router-dom';
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, LogIn, LayoutDashboard, Settings as SettingsIcon, X, Loader2, KeyRound } from 'lucide-react';
 import { useSettings } from '../lib/useSettings';
 
 export function AdminLayout() {
   const { user, login, logout, loading, error, clearError } = useAuth();
   const { settings } = useSettings();
+  const navigate = useNavigate();
+  const location = useLocation();
   
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [matricula, setMatricula] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+
+  React.useEffect(() => {
+    const state = location.state as { from?: string } | null;
+    if (state?.from && !user && !loading) {
+      setShowLoginModal(true);
+    }
+  }, [location.state, user, loading]);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +32,11 @@ export function AdminLayout() {
       setShowLoginModal(false);
       setMatricula('');
       setPassword('');
+      
+      const state = location.state as { from?: string } | null;
+      if (state?.from) {
+        navigate(state.from, { replace: true });
+      }
     } catch (err) {
       // Error is handled by AuthContext and displayed below
     } finally {

@@ -134,7 +134,7 @@ export function ClassDetail() {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{classData.title}</h1>
-          <p className="text-gray-500 mt-1">{classData.date ? format(new Date(classData.date), 'dd/MM/yyyy') : ''}</p>
+          <p className="text-gray-500 mt-1">{classData.date ? format(new Date(classData.date), "dd/MM/yyyy 'às' HH:mm") : ''}</p>
         </div>
         <div className="flex gap-3 flex-wrap items-center">
           

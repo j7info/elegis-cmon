@@ -140,7 +140,7 @@ router.post('/:id/reset-password', authMiddleware, isAdminMiddleware, async (req
       [token, expires, user.id]
     );
     
-    const baseUrl = getAppBaseUrl(req);
+    const baseUrl = process.env.FRONTEND_URL || req.headers.origin || 'http://localhost:5173';
     await sendRecoveryEmail(user.email, token, baseUrl);
 
     res.json({ message: 'E-mail de recuperação enviado com sucesso para o usuário.' });

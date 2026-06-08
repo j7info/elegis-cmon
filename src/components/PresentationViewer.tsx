@@ -142,20 +142,23 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   const middleSlide = hasMiddle ? Math.floor(total / 2) : -1;
   const endSlide = total - 1;
 
+  const pStart = classData?.points_start ?? 40;
+  const pMiddle = classData?.points_middle ?? 30;
+  const pEnd = classData?.points_end ?? 30;
+
   let activeQR = null;
   if (currentSlide === startSlide) {
-    activeQR = { step: 'start', title: 'Registre sua Entrada - 40 pts' };
+    activeQR = { step: 'start', title: `Registre sua Entrada - ${pStart} pts` };
   } else if (currentSlide === middleSlide) {
-    activeQR = { step: 'middle', title: 'Confirme sua Presença - 30 pts' };
+    activeQR = { step: 'middle', title: `Confirme sua Presença - ${pMiddle} pts` };
   } else if (currentSlide === endSlide && total > 1) { // If total is 1, start handles it
-    activeQR = { step: 'end', title: 'Registre sua Saída - 30 pts' };
+    activeQR = { step: 'end', title: `Registre sua Saída - ${pEnd} pts` };
   }
 
   useEffect(() => {
     if (activeQR && classData) {
       const step = activeQR.step;
-      const capitalized = step.charAt(0).toUpperCase() + step.slice(1);
-      const activeAt = classData[`qr${capitalized}At`];
+      const activeAt = classData[`qr_${step}_at`];
       if (!activeAt) {
         onActivateQR(step);
       }
@@ -168,13 +171,12 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
       return;
     }
     const step = activeQR.step;
-    const capitalized = step.charAt(0).toUpperCase() + step.slice(1);
-    const activeAt = classData[`qr${capitalized}At`];
-    const durationMinutes = classData.qrDurationMinutes || 10;
-    
+    const activeAt = classData[`qr_${step}_at`];
+    const durationMinutes = classData.qr_duration_minutes || 10;
+
     if (!activeAt) return;
     const interval = setInterval(() => {
-      const expiresAt = activeAt + (durationMinutes * 60 * 1000);
+      const expiresAt = Number(activeAt) + (durationMinutes * 60 * 1000);
       const remaining = expiresAt - Date.now();
       if (remaining <= 0) {
         setTimeLeft(0);
@@ -189,13 +191,13 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   // Filter recent scans for the currently active QR step
   const recentScans = activeQR ? attendances
     .filter(a => {
-      if (activeQR.step === 'start') return !!a.scanStart;
-      if (activeQR.step === 'middle') return !!a.scanMiddle;
-      return !!a.scanEnd;
+      if (activeQR.step === 'start') return !!a.scan_start;
+      if (activeQR.step === 'middle') return !!a.scan_middle;
+      return !!a.scan_end;
     })
     .sort((a, b) => {
-      const aTime = activeQR.step === 'start' ? a.scanStart : activeQR.step === 'middle' ? a.scanMiddle : a.scanEnd;
-      const bTime = activeQR.step === 'start' ? b.scanStart : activeQR.step === 'middle' ? b.scanMiddle : b.scanEnd;
+      const aTime = activeQR.step === 'start' ? a.scan_start : activeQR.step === 'middle' ? a.scan_middle : a.scan_end;
+      const bTime = activeQR.step === 'start' ? b.scan_start : activeQR.step === 'middle' ? b.scan_middle : b.scan_end;
       return bTime - aTime; // descending
     })
     .slice(0, 8) : []; // Max 8 recent names
@@ -276,7 +278,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
                   recentScans.map(s => (
                     <div key={s.identifier} className="flex items-center gap-2 text-sm text-gray-700 bg-white shadow-sm border border-gray-100 px-3 py-1.5 rounded-md animate-in slide-in-from-top-2 fade-in duration-300">
                       <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                      <span className="truncate font-medium flex-1 text-left">{s.fullName}</span>
+                      <span className="truncate font-medium flex-1 text-left">{s.full_name}</span>
                     </div>
                   ))
                 )}

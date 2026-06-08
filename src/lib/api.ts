@@ -84,6 +84,25 @@ class ApiClient {
   delete<T = any>(path: string) {
     return this.request<T>(path, { method: 'DELETE' });
   }
+
+  async upload<T = any>(path: string, formData: FormData): Promise<T> {
+    // Não definir Content-Type: o browser gera o boundary do multipart.
+    const headers: Record<string, string> = {};
+    const token = this.getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
+      throw new Error(data.error || `Erro ${response.status}`);
+    }
+    return response.json();
+  }
 }
 
 export const api = new ApiClient(API_BASE);

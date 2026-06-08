@@ -25,10 +25,13 @@ router.post('/:classId/registrations', async (req: Request, res: Response) => {
 
     const courseId = classResult.rows[0].course_id;
 
+    // Inscrição é em nível de CURSO: o aluno passa a ser aluno definitivo do
+    // curso. Em aulas seguintes ele apenas reafirma presença (scan), sem se
+    // recadastrar. Por isso o conflito é resolvido por (course_id, identifier).
     const { rows } = await pool.query(
       `INSERT INTO registrations (class_id, course_id, identifier, full_name, role, department)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (class_id, identifier) DO UPDATE SET
+       ON CONFLICT (course_id, identifier) DO UPDATE SET
          full_name = EXCLUDED.full_name,
          role = EXCLUDED.role,
          department = EXCLUDED.department

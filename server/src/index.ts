@@ -13,6 +13,7 @@ import settingsRoutes from './routes/settings.js';
 import usersRoutes from './routes/users.js';
 import publicRoutes from './routes/public.js';
 import { apiLimiter } from './middleware/rateLimit.js';
+import { UPLOAD_DIR } from './middleware/upload.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001');
@@ -62,6 +63,10 @@ app.use(cors({
 
 app.use(express.json({ limit: BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
+
+// Arquivos enviados (PDFs de apresentação) — servidos antes do rate limiter
+// para não consumir o limite da API e reusar o proxy /api do nginx.
+app.use('/api/uploads', express.static(UPLOAD_DIR));
 
 // Rate limiting global
 app.use('/api', apiLimiter);

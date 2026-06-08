@@ -4,9 +4,10 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
+import { maskIdentifier } from '../lib/format';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export function ClassDetail() {
@@ -28,6 +29,12 @@ export function ClassDetail() {
   const [editAuxTeacherId, setEditAuxTeacherId] = useState('');
   const [editingDuration, setEditingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('10');
+  const [editPdfFile, setEditPdfFile] = useState<File | null>(null);
+
+  const [editingPoints, setEditingPoints] = useState(false);
+  const [pointsStartInput, setPointsStartInput] = useState('40');
+  const [pointsMiddleInput, setPointsMiddleInput] = useState('30');
+  const [pointsEndInput, setPointsEndInput] = useState('30');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<any>(null);
@@ -35,21 +42,28 @@ export function ClassDetail() {
   const loadData = useCallback(async () => {
     if (!classId) return;
     try {
-      const [cls, atts, regs] = await Promise.all([
-        api.get(`/classes/${classId}`),
+      const cls = await api.get(`/classes/${classId}`);
+      // A lista é de alunos do CURSO (aluno definitivo): em cada aula ele
+      // apenas reafirma presença. Cruzamos com as presenças desta aula.
+      const [atts, studs] = await Promise.all([
         api.get(`/classes/${classId}/attendances`),
-        api.get(`/classes/${classId}/registrations`),
+        api.get(`/courses/${cls.course_id}/students`),
       ]);
       setClassData(cls);
       setAttendances(atts);
-      setRegistrations(regs);
+      setRegistrations(studs);
       if (cls.qr_duration_minutes && !editingDuration) {
         setDurationInput(String(cls.qr_duration_minutes));
+      }
+      if (!editingPoints) {
+        setPointsStartInput(String(cls.points_start ?? 40));
+        setPointsMiddleInput(String(cls.points_middle ?? 30));
+        setPointsEndInput(String(cls.points_end ?? 30));
       }
     } catch (err) {
       console.error('Error loading class:', err);
     }
-  }, [classId, editingDuration]);
+  }, [classId, editingDuration, editingPoints]);
 
   useEffect(() => {
     loadData();
@@ -59,6 +73,19 @@ export function ClassDetail() {
   }, [loadData]);
 
   if (!classData) return <div className="p-8 text-center text-gray-500">Carregando aula...</div>;
+
+  // Pesos de pontuação configurados por aula (fallback 40/30/30)
+  const pStart = classData.points_start ?? 40;
+  const pMiddle = classData.points_middle ?? 30;
+  const pEnd = classData.points_end ?? 30;
+  const pTotal = pStart + pMiddle + pEnd;
+  const calcPoints = (att: any) => {
+    let p = 0;
+    if (att?.scan_start) p += pStart;
+    if (att?.scan_middle) p += pMiddle;
+    if (att?.scan_end) p += pEnd;
+    return p;
+  };
 
   const updateClass = async (updates: any) => {
     try {
@@ -91,6 +118,7 @@ export function ClassDetail() {
       setEditTime('');
     }
     setEditAuxTeacherId(classData.auxiliary_teacher_id ? String(classData.auxiliary_teacher_id) : '');
+    setEditPdfFile(null);
     setIsEditingClass(true);
     
     // Load users if empty
@@ -109,13 +137,20 @@ export function ClassDetail() {
     const combinedDate = editDate && editTime ? new Date(`${editDate}T${editTime}`).toISOString() : undefined;
     
     try {
-      const updated = await api.put(`/classes/${classId}`, {
+      let updated = await api.put(`/classes/${classId}`, {
         title: editTitle.trim(),
         description: editDescription.trim(),
         date: combinedDate,
         auxiliary_teacher_id: editAuxTeacherId ? parseInt(editAuxTeacherId) : null,
       });
+      // Anexa/substitui o PDF de apresentação, se um novo foi selecionado
+      if (editPdfFile) {
+        const fd = new FormData();
+        fd.append('file', editPdfFile);
+        updated = await api.upload(`/classes/${classId}/presentation`, fd);
+      }
       setClassData(updated);
+      setEditPdfFile(null);
       setIsEditingClass(false);
     } catch (err: any) {
       alert(err.response?.data?.error || 'Erro ao atualizar aula.');
@@ -129,23 +164,46 @@ export function ClassDetail() {
     setEditingDuration(false);
   };
 
+  const savePoints = async () => {
+    const ps = parseInt(pointsStartInput, 10);
+    const pm = parseInt(pointsMiddleInput, 10);
+    const pe = parseInt(pointsEndInput, 10);
+    if ([ps, pm, pe].some(v => isNaN(v) || v < 0)) return;
+    await updateClass({ points_start: ps, points_middle: pm, points_end: pe });
+    setEditingPoints(false);
+  };
+
+  // Abre a apresentação: usa o PDF salvo na aula, ou pede um arquivo na hora.
+  const handlePresent = async () => {
+    if (classData.presentation_url) {
+      try {
+        // Resolve a URL salva ('/api/uploads/...') contra a base da API,
+        // para funcionar tanto em produção (nginx) quanto em dev (VITE_API_URL).
+        const apiBase = import.meta.env.VITE_API_URL || '/api';
+        const fileUrl = String(classData.presentation_url).replace(/^\/api/, apiBase);
+        const resp = await fetch(fileUrl);
+        const blob = await resp.blob();
+        setPresentationFile(new File([blob], 'apresentacao.pdf', { type: 'application/pdf' }));
+        return;
+      } catch (err) {
+        console.error('Erro ao carregar PDF salvo:', err);
+      }
+    }
+    fileInputRef.current?.click();
+  };
+
   const activateQRStep = async (step: string) => {
     await updateClass({ [`qr_${step}_at`]: Date.now() });
   };
 
   const exportCSV = () => {
     if (registrations.length === 0) return;
-    const headers = ['Nome Completo', 'CPF/Email', 'Função', 'Departamento', 'Chegada (Início)', 'Confirmação (Meio)', 'Saída (Fim)', 'Pontuação'];
+    const headers = ['Nome Completo', 'CPF/Email', 'Função', 'Departamento', `Chegada (Início ${pStart})`, `Confirmação (Meio ${pMiddle})`, `Saída (Fim ${pEnd})`, 'Pontuação'];
     const escapeCsv = (val: any) => `"${String(val || '').replace(/"/g, '""')}"`;
     const formatTime = (ts: number | undefined) => ts ? format(new Date(ts), 'HH:mm:ss') : 'Falta';
-    
+
     const rows = registrations.map(reg => {
       const att = attendances.find(a => a.identifier === reg.identifier);
-      let p = 0;
-      if (att?.scan_start) p += 40;
-      if (att?.scan_middle) p += 30;
-      if (att?.scan_end) p += 30;
-
       return [
         escapeCsv(reg.full_name),
         escapeCsv(reg.identifier),
@@ -154,7 +212,7 @@ export function ClassDetail() {
         escapeCsv(att ? formatTime(att.scan_start) : 'Falta'),
         escapeCsv(att ? formatTime(att.scan_middle) : 'Falta'),
         escapeCsv(att ? formatTime(att.scan_end) : 'Falta'),
-        p
+        calcPoints(att)
       ].join(',');
     });
     
@@ -168,6 +226,59 @@ export function ClassDetail() {
     URL.revokeObjectURL(url);
   };
 
+  // Exporta a lista oficial de presença em PDF (CPF completo) via impressão.
+  const exportPDF = () => {
+    if (registrations.length === 0) return;
+    const dateStr = classData.date ? format(new Date(classData.date), "dd/MM/yyyy 'às' HH:mm") : '-';
+    const esc = (v: any) => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+    const fmt = (ts: number | undefined) => ts ? format(new Date(ts), 'HH:mm') : '—';
+
+    const bodyRows = registrations.map(reg => {
+      const att = attendances.find(a => a.identifier === reg.identifier);
+      return `<tr>
+        <td>${esc(reg.full_name)}</td>
+        <td>${esc(reg.identifier)}</td>
+        <td>${esc(reg.role)}</td>
+        <td>${esc(reg.department)}</td>
+        <td class="c">${fmt(att?.scan_start)}</td>
+        <td class="c">${fmt(att?.scan_middle)}</td>
+        <td class="c">${fmt(att?.scan_end)}</td>
+        <td class="c b">${calcPoints(att)}</td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+      <title>Lista de Presença - ${esc(classData.title)}</title>
+      <style>
+        * { font-family: Arial, Helvetica, sans-serif; }
+        body { padding: 24px; color: #1f2937; }
+        h1 { font-size: 18px; margin: 0 0 4px; }
+        .sub { color: #6b7280; font-size: 12px; margin: 0 0 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; }
+        th { background: #f3f4f6; }
+        td.c, th.c { text-align: center; }
+        td.b { font-weight: bold; }
+        @media print { body { padding: 0; } }
+      </style></head><body>
+      <h1>Lista de Presença — ${esc(classData.title)}</h1>
+      <p class="sub">Data: ${dateStr} &nbsp;|&nbsp; Pontuação: Início ${pStart} / Meio ${pMiddle} / Fim ${pEnd} (total ${pTotal}) &nbsp;|&nbsp; ${registrations.length} aluno(s)</p>
+      <table>
+        <thead><tr>
+          <th>Nome</th><th>Identificação (CPF/Email)</th><th>Função</th><th>Departamento</th>
+          <th class="c">Início (${pStart})</th><th class="c">Meio (${pMiddle})</th><th class="c">Fim (${pEnd})</th><th class="c">Total</th>
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+      <script>window.onload = function(){ window.print(); }<\/script>
+      </body></html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('Permita pop-ups para exportar o PDF.'); return; }
+    win.document.write(html);
+    win.document.close();
+  };
+
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
   const registrationUrl = `${appUrl}/#/register/${classId}`;
 
@@ -179,11 +290,7 @@ export function ClassDetail() {
 
   const chartData = registrations.map(reg => {
     const att = attendances.find(a => a.identifier === reg.identifier);
-    let p = 0;
-    if (att?.scan_start) p += 40;
-    if (att?.scan_middle) p += 30;
-    if (att?.scan_end) p += 30;
-    return { name: reg.full_name || reg.identifier, points: p };
+    return { name: reg.full_name || reg.identifier, points: calcPoints(att) };
   }).sort((a, b) => b.points - a.points);
 
   return (
@@ -232,6 +339,26 @@ export function ClassDetail() {
             )}
           </div>
 
+          <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+            <Award className="w-4 h-4 text-gray-500" />
+            <span className="text-sm font-medium text-gray-600">Pontuação:</span>
+            {editingPoints && classData.status !== 'completed' ? (
+              <div className="flex items-center gap-1.5">
+                <input type="number" min="0" value={pointsStartInput} onChange={e => setPointsStartInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Início" />
+                <span className="text-gray-300">/</span>
+                <input type="number" min="0" value={pointsMiddleInput} onChange={e => setPointsMiddleInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Meio" />
+                <span className="text-gray-300">/</span>
+                <input type="number" min="0" value={pointsEndInput} onChange={e => setPointsEndInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Fim" />
+                <button onClick={savePoints} className="text-xs font-bold text-teal-600 ml-1">Salvar</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-gray-800">{pStart} / {pMiddle} / {pEnd}</span>
+                {classData.status !== 'completed' && <button onClick={() => setEditingPoints(true)} className="text-xs text-teal-600 underline">Editar</button>}
+              </div>
+            )}
+          </div>
+
           <button onClick={copyLink} className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
             {linkCopied ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />} 
             Link Cadastro
@@ -245,8 +372,8 @@ export function ClassDetail() {
           {classData.status === 'active' && (
             <>
               <input type="file" accept="application/pdf" ref={fileInputRef} className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) setPresentationFile(file); }} />
-              <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-                <Presentation className="w-4 h-4" /> Apresentar PDF
+              <button onClick={handlePresent} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                <Presentation className="w-4 h-4" /> {classData.presentation_url ? 'Apresentar' : 'Apresentar PDF'}
               </button>
               <button onClick={() => updateClass({ status: 'completed' })} className="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4" /> Concluir Aula
@@ -255,6 +382,9 @@ export function ClassDetail() {
           )}
           <button onClick={exportCSV} disabled={registrations.length === 0} className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 disabled:opacity-50 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
             <Download className="w-4 h-4" /> Exportar CSV
+          </button>
+          <button onClick={exportPDF} disabled={registrations.length === 0} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 disabled:opacity-50 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+            <FileText className="w-4 h-4" /> Exportar PDF
           </button>
         </div>
       </div>
@@ -275,30 +405,30 @@ export function ClassDetail() {
 
       {classData.status === 'active' && (
         <div className="grid md:grid-cols-3 gap-6">
-          <QRCard 
-            url={`${appUrl}/#/s/${classId}/start`} 
-            title="Entrada (Início) - 40 pts" 
-            description={`Escaneie nos primeiros ${classData.qr_duration_minutes || 10} min`} 
+          <QRCard
+            url={`${appUrl}/#/s/${classId}/start`}
+            title={`Entrada (Início) - ${pStart} pts`}
+            description={`Escaneie nos primeiros ${classData.qr_duration_minutes || 10} min`}
             step="start"
             attendances={attendances}
             activeAt={classData.qr_start_at}
             onActivate={() => activateQRStep('start')}
             durationMinutes={classData.qr_duration_minutes || 10}
           />
-          <QRCard 
-            url={`${appUrl}/#/s/${classId}/middle`} 
-            title="Presença (Meio) - 30 pts" 
-            description={`Janela de presença (${classData.qr_duration_minutes || 10} min)`} 
+          <QRCard
+            url={`${appUrl}/#/s/${classId}/middle`}
+            title={`Presença (Meio) - ${pMiddle} pts`}
+            description={`Janela de presença (${classData.qr_duration_minutes || 10} min)`}
             step="middle"
             attendances={attendances}
             activeAt={classData.qr_middle_at}
             onActivate={() => activateQRStep('middle')}
             durationMinutes={classData.qr_duration_minutes || 10}
           />
-          <QRCard 
-            url={`${appUrl}/#/s/${classId}/end`} 
-            title="Saída (Fim) - 30 pts" 
-            description={`Encerramento da aula (${classData.qr_duration_minutes || 10} min)`} 
+          <QRCard
+            url={`${appUrl}/#/s/${classId}/end`}
+            title={`Saída (Fim) - ${pEnd} pts`}
+            description={`Encerramento da aula (${classData.qr_duration_minutes || 10} min)`}
             step="end"
             attendances={attendances}
             activeAt={classData.qr_end_at}
@@ -342,9 +472,9 @@ export function ClassDetail() {
               <tr>
                 <th className="px-4 py-3 text-gray-700">Nome</th>
                 <th className="px-4 py-3 text-gray-700">Identificação</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Início (40)</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Meio (30)</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Fim (30)</th>
+                <th className="px-4 py-3 text-gray-700 text-center">Início ({pStart})</th>
+                <th className="px-4 py-3 text-gray-700 text-center">Meio ({pMiddle})</th>
+                <th className="px-4 py-3 text-gray-700 text-center">Fim ({pEnd})</th>
                 <th className="px-4 py-3 text-gray-700 text-center font-bold">Total</th>
               </tr>
             </thead>
@@ -354,11 +484,11 @@ export function ClassDetail() {
               ) : (
                 registrations.map(reg => {
                   const att = attendances.find(a => a.identifier === reg.identifier);
-                  let p = 0; if (att?.scan_start) p+=40; if (att?.scan_middle) p+=30; if (att?.scan_end) p+=30;
+                  const p = calcPoints(att);
                   return (
-                    <tr key={reg.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                    <tr key={reg.identifier} className="border-b border-gray-50 hover:bg-gray-50/50">
                       <td className="px-4 py-3 font-medium text-gray-900">{reg.full_name}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-400">{reg.identifier}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-400">{maskIdentifier(reg.identifier)}</td>
                       <td className="px-4 py-3 text-center text-xs">
                         {att?.scan_start ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
                       </td>
@@ -458,6 +588,18 @@ export function ClassDetail() {
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">PDF de Apresentação</label>
+                <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
+                  {editPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
+                  <span className={clsx('text-sm', editPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
+                    {editPdfFile ? editPdfFile.name : (classData.presentation_url ? 'PDF anexado — selecione para substituir' : 'Selecionar PDF (opcional)')}
+                  </span>
+                  <input type="file" accept="application/pdf" className="hidden"
+                    onChange={e => setEditPdfFile(e.target.files?.[0] || null)} />
+                </label>
               </div>
 
               <div className="pt-4 flex justify-end gap-3">

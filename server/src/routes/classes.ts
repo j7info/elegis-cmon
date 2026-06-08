@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware } from '../middleware/auth.js';
+import { upload } from '../middleware/upload.js';
 
 const router = Router();
 
@@ -51,7 +52,7 @@ router.get('/course/:courseId', authMiddleware, async (req: AuthRequest, res: Re
 
 // POST /api/classes — Criar aula
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id } = req.body;
+  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end } = req.body;
 
   if (!course_id || !title?.trim()) {
     res.status(400).json({ error: 'course_id e title são obrigatórios' });
@@ -66,9 +67,12 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO classes (course_id, title, description, date, qr_duration_minutes, owner_id, status, auxiliary_teacher_id)
-       VALUES ($1, $2, $3, NOW(), $4, $5, 'scheduled', $6) RETURNING *`,
-      [course_id, title.trim(), description?.trim() || '', qr_duration_minutes || 10, req.user!.id, auxiliary_teacher_id || null]
+      `INSERT INTO classes (course_id, title, description, date, qr_duration_minutes, owner_id, status, auxiliary_teacher_id, points_start, points_middle, points_end)
+       VALUES ($1, $2, $3, NOW(), $4, $5, 'scheduled', $6, $7, $8, $9) RETURNING *`,
+      [
+        course_id, title.trim(), description?.trim() || '', qr_duration_minutes || 10, req.user!.id, auxiliary_teacher_id || null,
+        points_start ?? 40, points_middle ?? 30, points_end ?? 30,
+      ]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -94,6 +98,13 @@ router.get('/:id', async (req: Request, res: Response) => {
       date: classData.date,
       status: classData.status,
       qr_duration_minutes: classData.qr_duration_minutes,
+      qr_start_at: classData.qr_start_at,
+      qr_middle_at: classData.qr_middle_at,
+      qr_end_at: classData.qr_end_at,
+      presentation_url: classData.presentation_url,
+      points_start: classData.points_start,
+      points_middle: classData.points_middle,
+      points_end: classData.points_end,
     });
   } catch (err) {
     console.error('Get class error:', err);
@@ -103,7 +114,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // PUT /api/classes/:id — Atualizar aula (status, QR timestamps)
 router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id } = req.body;
+  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id, points_start, points_middle, points_end } = req.body;
 
   try {
     const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
@@ -152,6 +163,18 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
       setClauses.push(`auxiliary_teacher_id = $${paramIdx++}`);
       values.push(auxiliary_teacher_id);
     }
+    if (points_start !== undefined) {
+      setClauses.push(`points_start = $${paramIdx++}`);
+      values.push(points_start);
+    }
+    if (points_middle !== undefined) {
+      setClauses.push(`points_middle = $${paramIdx++}`);
+      values.push(points_middle);
+    }
+    if (points_end !== undefined) {
+      setClauses.push(`points_end = $${paramIdx++}`);
+      values.push(points_end);
+    }
 
     values.push(req.params.id);
 
@@ -170,6 +193,41 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
   } catch (err) {
     console.error('Update class error:', err);
     res.status(500).json({ error: 'Erro ao atualizar aula' });
+  }
+});
+
+// POST /api/classes/:id/presentation — Anexar/substituir PDF de apresentação
+router.post('/:id/presentation', authMiddleware, isCourseCreatorMiddleware, upload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'Nenhum arquivo enviado' });
+      return;
+    }
+    if (file.mimetype !== 'application/pdf') {
+      res.status(400).json({ error: 'O arquivo de apresentação deve ser um PDF' });
+      return;
+    }
+
+    const presentationUrl = `/api/uploads/${file.filename}`;
+    const { rows } = await pool.query(
+      'UPDATE classes SET presentation_url = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [presentationUrl, req.params.id]
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Upload presentation error:', err);
+    res.status(500).json({ error: 'Erro ao enviar apresentação' });
   }
 });
 

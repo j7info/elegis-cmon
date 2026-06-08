@@ -28,9 +28,9 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       return;
     }
 
-    // Get all classes for the course
+    // Get all classes for the course (com os pesos de pontuação por aula)
     const classesResult = await pool.query(
-      'SELECT id FROM classes WHERE course_id = $1',
+      'SELECT id, points_start, points_middle, points_end FROM classes WHERE course_id = $1',
       [courseId]
     );
     const classIds = classesResult.rows.map(r => r.id);
@@ -40,24 +40,29 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       return;
     }
 
-    // Aggregate attendance across all classes
+    // Total possível = soma dos pesos (início+meio+fim) de cada aula do curso
+    const totalPossiblePoints = classesResult.rows.reduce(
+      (sum, c) => sum + (c.points_start ?? 40) + (c.points_middle ?? 30) + (c.points_end ?? 30),
+      0
+    );
+
+    // Aggregate attendance across all classes usando os pesos de cada aula
     const { rows } = await pool.query(
       `SELECT
         a.identifier,
         a.full_name,
         a.department,
         a.role,
-        SUM(CASE WHEN a.scan_start IS NOT NULL THEN 40 ELSE 0 END) +
-        SUM(CASE WHEN a.scan_middle IS NOT NULL THEN 30 ELSE 0 END) +
-        SUM(CASE WHEN a.scan_end IS NOT NULL THEN 30 ELSE 0 END) AS points
+        SUM(CASE WHEN a.scan_start  IS NOT NULL THEN c.points_start  ELSE 0 END) +
+        SUM(CASE WHEN a.scan_middle IS NOT NULL THEN c.points_middle ELSE 0 END) +
+        SUM(CASE WHEN a.scan_end    IS NOT NULL THEN c.points_end    ELSE 0 END) AS points
        FROM attendances a
+       JOIN classes c ON a.class_id = c.id
        WHERE a.class_id = ANY($1)
        GROUP BY a.identifier, a.full_name, a.department, a.role
        ORDER BY points DESC`,
       [classIds]
     );
-
-    const totalPossiblePoints = classIds.length * 100;
     const students = rows.map(s => ({
       ...s,
       points: parseInt(s.points),

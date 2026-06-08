@@ -34,6 +34,25 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/courses/enrolled — Listar cursos em que o usuário está matriculado (aluno)
+router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT c.*
+       FROM courses c
+       INNER JOIN registrations r ON r.course_id = c.id
+       INNER JOIN app_users u ON u.id = $1
+       WHERE r.identifier = u.cpf OR r.identifier = u.email
+       ORDER BY c.created_at DESC`,
+      [req.user!.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('List enrolled courses error:', err);
+    res.status(500).json({ error: 'Erro ao listar cursos matriculados' });
+  }
+});
+
 // POST /api/courses — Criar curso
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
   const { title, description, duration_hours, additional_teachers } = req.body;
@@ -102,6 +121,29 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   } catch (err) {
     console.error('Get course error:', err);
     res.status(500).json({ error: 'Erro ao buscar curso' });
+  }
+});
+
+// GET /api/courses/:id/students — Alunos definitivos do curso (inscritos)
+router.get('/:id/students', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Curso não encontrado' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (identifier) identifier, full_name, role, department, created_at
+       FROM registrations
+       WHERE course_id = $1
+       ORDER BY identifier, created_at`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('List course students error:', err);
+    res.status(500).json({ error: 'Erro ao listar alunos do curso' });
   }
 });
 

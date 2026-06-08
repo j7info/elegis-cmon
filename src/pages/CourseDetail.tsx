@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
+import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Plus, Calendar, ChevronRight, BarChart, Award } from 'lucide-react';
+import { ArrowLeft, Plus, Calendar, ChevronRight, BarChart, Award, FileUp, FileText } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
@@ -17,6 +18,10 @@ export function CourseDetail() {
   const [auxiliaryTeacherId, setAuxiliaryTeacherId] = useState('');
   const [newDate, setNewDate] = useState('');
   const [newTime, setNewTime] = useState('');
+  const [newPdfFile, setNewPdfFile] = useState<File | null>(null);
+  const [pointsStart, setPointsStart] = useState('40');
+  const [pointsMiddle, setPointsMiddle] = useState('30');
+  const [pointsEnd, setPointsEnd] = useState('30');
   const [studentsReport, setStudentsReport] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
 
@@ -48,19 +53,34 @@ export function CourseDetail() {
     try {
       setIsCreating(true);
       const combinedDate = newDate && newTime ? new Date(`${newDate}T${newTime}`).toISOString() : undefined;
-      await api.post('/classes', {
+      const created = await api.post('/classes', {
         course_id: parseInt(courseId),
         title: newTitle.trim(),
         description: newDescription.trim(),
         date: combinedDate,
         qr_duration_minutes: 10,
         auxiliary_teacher_id: auxiliaryTeacherId ? parseInt(auxiliaryTeacherId) : undefined,
+        points_start: parseInt(pointsStart, 10) || 0,
+        points_middle: parseInt(pointsMiddle, 10) || 0,
+        points_end: parseInt(pointsEnd, 10) || 0,
       });
+
+      // Anexa o PDF de apresentação, se selecionado
+      if (newPdfFile && created?.id) {
+        const fd = new FormData();
+        fd.append('file', newPdfFile);
+        await api.upload(`/classes/${created.id}/presentation`, fd);
+      }
+
       setNewTitle('');
       setNewDescription('');
       setAuxiliaryTeacherId('');
       setNewDate('');
       setNewTime('');
+      setNewPdfFile(null);
+      setPointsStart('40');
+      setPointsMiddle('30');
+      setPointsEnd('30');
       await loadData();
     } catch (error) {
       console.error('Create class error:', error);
@@ -150,7 +170,44 @@ export function CourseDetail() {
                   ))}
                 </select>
               </div>
-              <button 
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium text-gray-700">Pontuação da Aula</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <span className="text-xs text-gray-500">Início</span>
+                    <input type="number" min="0" value={pointsStart} onChange={e => setPointsStart(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Meio</span>
+                    <input type="number" min="0" value={pointsMiddle} onChange={e => setPointsMiddle(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Fim</span>
+                    <input type="number" min="0" value={pointsEnd} onChange={e => setPointsEnd(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Total: {(parseInt(pointsStart, 10) || 0) + (parseInt(pointsMiddle, 10) || 0) + (parseInt(pointsEnd, 10) || 0)} pts. Você pode alterar a qualquer momento na aula.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
+                <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
+                  {newPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
+                  <span className={clsx('text-sm', newPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
+                    {newPdfFile ? newPdfFile.name : 'Selecionar PDF (os QR de presença aparecem durante a apresentação)'}
+                  </span>
+                  <input type="file" accept="application/pdf" className="hidden"
+                    onChange={e => setNewPdfFile(e.target.files?.[0] || null)} />
+                </label>
+              </div>
+
+              <button
                 type="submit" 
                 disabled={isCreating || !newTitle.trim()}
                 className="px-6 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
@@ -222,7 +279,7 @@ export function CourseDetail() {
                       </span>
                     </div>
                     <div className="text-xs text-gray-500">
-                      Cpf/Email: {s.identifier}
+                      Cpf/Email: {maskIdentifier(s.identifier)}
                     </div>
                   </div>
                 ))}

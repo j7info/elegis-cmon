@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware } from '../middleware/auth.js';
-import { upload } from '../middleware/upload.js';
+import { upload, UPLOAD_DIR } from '../middleware/upload.js';
 
 const router = Router();
 
@@ -228,6 +230,44 @@ router.post('/:id/presentation', authMiddleware, isCourseCreatorMiddleware, uplo
   } catch (err) {
     console.error('Upload presentation error:', err);
     res.status(500).json({ error: 'Erro ao enviar apresentação' });
+  }
+});
+
+// DELETE /api/classes/:id/presentation — Remover PDF de apresentação
+router.delete('/:id/presentation', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      'SELECT presentation_url FROM classes WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (rows.length === 0 || !rows[0].presentation_url) {
+      res.status(404).json({ error: 'Nenhum PDF encontrado para esta aula' });
+      return;
+    }
+
+    // Remove o arquivo do disco
+    const fileName = (rows[0].presentation_url as string).replace('/api/uploads/', '');
+    const filePath = path.join(UPLOAD_DIR, fileName);
+    fs.unlink(filePath, (err) => {
+      if (err) console.error('Erro ao deletar arquivo PDF:', err);
+    });
+
+    const { rows: updated } = await pool.query(
+      'UPDATE classes SET presentation_url = NULL, updated_at = NOW() WHERE id = $1 RETURNING *',
+      [req.params.id]
+    );
+
+    res.json(updated[0]);
+  } catch (err) {
+    console.error('Delete presentation error:', err);
+    res.status(500).json({ error: 'Erro ao remover apresentação' });
   }
 });
 

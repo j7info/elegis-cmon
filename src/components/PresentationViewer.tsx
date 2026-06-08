@@ -31,39 +31,72 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
     
     async function loadPDF() {
       try {
         setLoading(true);
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let arrayBuffer: ArrayBuffer;
+        try {
+          arrayBuffer = await file.arrayBuffer();
+        } catch {
+          if (!cancelled) setError('Não foi possível ler o arquivo.');
+          setLoading(false);
+          return;
+        }
+        
+        let pdf: any;
+        try {
+          pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        } catch {
+          if (!cancelled) setError('Erro ao processar o PDF. O arquivo pode estar corrompido.');
+          setLoading(false);
+          return;
+        }
         
         const generatedSlides: string[] = [];
         
         for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 2.0 }); // High quality
+          if (cancelled) return;
+          
+          let page: any;
+          try {
+            page = await pdf.getPage(i);
+          } catch {
+            continue;
+          }
+          
+          const viewport = page.getViewport({ scale: 1.0 });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           
           if (!context) continue;
           
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+          canvas.width = Math.min(viewport.width, 4096);
+          canvas.height = Math.min(viewport.height, 4096);
           
-          // @ts-ignore
-          await page.render({ canvasContext: context, viewport }).promise;
-          generatedSlides.push(canvas.toDataURL('image/jpeg', 0.8));
+          try {
+            // @ts-ignore
+            await page.render({ canvasContext: context, viewport }).promise;
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            generatedSlides.push(dataUrl);
+          } catch (e) {
+            console.warn('Erro ao renderizar página', i, e);
+            continue;
+          }
         }
         
-        if (isMounted) {
-          setSlides(generatedSlides);
+        if (!cancelled) {
+          if (generatedSlides.length === 0) {
+            setError('Não foi possível gerar slides a partir do PDF.');
+          } else {
+            setSlides(generatedSlides);
+          }
           setLoading(false);
         }
       } catch (err: any) {
-        console.error('Error loading PDF:', err);
-        if (isMounted) {
+        console.error('Erro inesperado no PDF:', err);
+        if (!cancelled) {
           setError('Erro ao ler o PDF. Certifique-se de que é um arquivo válido.');
           setLoading(false);
         }
@@ -72,7 +105,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
     
     loadPDF();
     
-    return () => { isMounted = false; };
+    return () => { cancelled = true; };
   }, [file]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -108,35 +141,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  if (loading) {
-    return (
-      <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-12 h-12 animate-spin text-teal-500 mb-4" />
-        <p className="text-lg">Processando apresentação...</p>
-        <p className="text-gray-400 text-sm mt-2">Convertendo páginas em slides. Isso pode levar alguns segundos.</p>
-        <button onClick={onClose} className="mt-8 px-4 py-2 bg-gray-800 rounded-md hover:bg-gray-700 transition-colors text-sm">
-          Cancelar
-        </button>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center text-white">
-        <div className="bg-red-500/20 text-red-500 p-4 rounded-xl max-w-md text-center">
-          <p className="font-medium text-lg">{error}</p>
-        </div>
-        <button onClick={onClose} className="mt-8 px-4 py-2 bg-gray-800 rounded-md hover:bg-gray-700 transition-colors text-sm">
-          Voltar
-        </button>
-      </div>
-    );
-  }
-
   const total = slides.length;
-  // Calculate QR trigger slides
-  // start: 0, end: total - 1, middle: floor(total / 2) if total >= 3
   const hasMiddle = total >= 3;
   const startSlide = 0;
   const middleSlide = hasMiddle ? Math.floor(total / 2) : -1;
@@ -151,7 +156,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
     activeQR = { step: 'start', title: `Registre sua Entrada - ${pStart} pts` };
   } else if (currentSlide === middleSlide) {
     activeQR = { step: 'middle', title: `Confirme sua Presença - ${pMiddle} pts` };
-  } else if (currentSlide === endSlide && total > 1) { // If total is 1, start handles it
+  } else if (currentSlide === endSlide && total > 1) {
     activeQR = { step: 'end', title: `Registre sua Saída - ${pEnd} pts` };
   }
 
@@ -187,6 +192,32 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
     }, 1000);
     return () => clearInterval(interval);
   }, [activeQR, classData]);
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-12 h-12 animate-spin text-teal-500 mb-4" />
+        <p className="text-lg">Processando apresentação...</p>
+        <p className="text-gray-400 text-sm mt-2">Convertendo páginas em slides. Isso pode levar alguns segundos.</p>
+        <button onClick={onClose} className="mt-8 px-4 py-2 bg-gray-800 rounded-md hover:bg-gray-700 transition-colors text-sm">
+          Cancelar
+        </button>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center text-white">
+        <div className="bg-red-500/20 text-red-500 p-4 rounded-xl max-w-md text-center">
+          <p className="font-medium text-lg">{error}</p>
+        </div>
+        <button onClick={onClose} className="mt-8 px-4 py-2 bg-gray-800 rounded-md hover:bg-gray-700 transition-colors text-sm">
+          Voltar
+        </button>
+      </div>
+    );
+  }
 
   // Filter recent scans for the currently active QR step
   const recentScans = activeQR ? attendances

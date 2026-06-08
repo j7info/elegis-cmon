@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { maskIdentifier } from '../lib/format';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -30,6 +31,7 @@ export function ClassDetail() {
   const [editingDuration, setEditingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('10');
   const [editPdfFile, setEditPdfFile] = useState<File | null>(null);
+  const [removePdf, setRemovePdf] = useState(false);
 
   const [editingPoints, setEditingPoints] = useState(false);
   const [pointsStartInput, setPointsStartInput] = useState('40');
@@ -119,6 +121,7 @@ export function ClassDetail() {
     }
     setEditAuxTeacherId(classData.auxiliary_teacher_id ? String(classData.auxiliary_teacher_id) : '');
     setEditPdfFile(null);
+    setRemovePdf(false);
     setIsEditingClass(true);
     
     // Load users if empty
@@ -143,6 +146,10 @@ export function ClassDetail() {
         date: combinedDate,
         auxiliary_teacher_id: editAuxTeacherId ? parseInt(editAuxTeacherId) : null,
       });
+      // Remove o PDF se solicitado
+      if (removePdf) {
+        updated = await api.delete(`/classes/${classId}/presentation`);
+      }
       // Anexa/substitui o PDF de apresentação, se um novo foi selecionado
       if (editPdfFile) {
         const fd = new FormData();
@@ -151,6 +158,7 @@ export function ClassDetail() {
       }
       setClassData(updated);
       setEditPdfFile(null);
+      setRemovePdf(false);
       setIsEditingClass(false);
     } catch (err: any) {
       alert(err.response?.data?.error || 'Erro ao atualizar aula.');
@@ -182,6 +190,7 @@ export function ClassDetail() {
         const apiBase = import.meta.env.VITE_API_URL || '/api';
         const fileUrl = String(classData.presentation_url).replace(/^\/api/, apiBase);
         const resp = await fetch(fileUrl);
+        if (!resp.ok) throw new Error('Arquivo PDF não encontrado no servidor');
         const blob = await resp.blob();
         setPresentationFile(new File([blob], 'apresentacao.pdf', { type: 'application/pdf' }));
         return;
@@ -509,15 +518,17 @@ export function ClassDetail() {
       </div>
       
       {presentationFile && (
-        <PresentationViewer 
-          file={presentationFile} 
-          onClose={() => setPresentationFile(null)} 
-          classId={classId!}
-          appUrl={appUrl}
-          attendances={attendances}
-          onActivateQR={activateQRStep}
-          classData={classData}
-        />
+        <ErrorBoundary>
+          <PresentationViewer 
+            file={presentationFile} 
+            onClose={() => setPresentationFile(null)} 
+            classId={classId!}
+            appUrl={appUrl}
+            attendances={attendances}
+            onActivateQR={activateQRStep}
+            classData={classData}
+          />
+        </ErrorBoundary>
       )}
 
       {isEditingClass && (
@@ -592,14 +603,33 @@ export function ClassDetail() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">PDF de Apresentação</label>
-                <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
-                  {editPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
-                  <span className={clsx('text-sm', editPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
-                    {editPdfFile ? editPdfFile.name : (classData.presentation_url ? 'PDF anexado — selecione para substituir' : 'Selecionar PDF (opcional)')}
-                  </span>
-                  <input type="file" accept="application/pdf" className="hidden"
-                    onChange={e => setEditPdfFile(e.target.files?.[0] || null)} />
-                </label>
+
+                {removePdf ? (
+                  <div className="flex items-center gap-2 px-4 py-3 border border-red-200 rounded-lg bg-red-50">
+                    <span className="text-sm text-red-700 flex-1">PDF será removido ao salvar</span>
+                    <button type="button" onClick={() => setRemovePdf(false)}
+                      className="text-xs text-gray-600 hover:text-gray-800 font-medium">
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
+                      {editPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
+                      <span className={clsx('text-sm', editPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
+                        {editPdfFile ? editPdfFile.name : (classData.presentation_url ? 'Clique para substituir o PDF' : 'Selecionar PDF (opcional)')}
+                      </span>
+                      <input type="file" accept="application/pdf" className="hidden"
+                        onChange={e => setEditPdfFile(e.target.files?.[0] || null)} />
+                    </label>
+                    {classData.presentation_url && !editPdfFile && (
+                      <button type="button" onClick={() => setRemovePdf(true)}
+                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-1">
+                        <Trash2 className="w-4 h-4" /> Remover PDF
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 flex justify-end gap-3">

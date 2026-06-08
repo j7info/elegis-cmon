@@ -13,6 +13,7 @@ export interface AuthUser {
   orgao: string | null;
   status: string;
   must_change_password: boolean;
+  system_role: 'ADMIN' | 'COORDENADOR' | 'PROFESSOR' | 'ALUNO';
 }
 
 interface AuthContextType {

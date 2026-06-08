@@ -27,6 +27,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [persistentQR, setPersistentQR] = useState<{step: string, title: string} | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -151,31 +152,43 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   const pMiddle = classData?.points_middle ?? 30;
   const pEnd = classData?.points_end ?? 30;
 
-  let activeQR = null;
+  let slideQR: {step: string, title: string} | null = null;
   if (currentSlide === startSlide) {
-    activeQR = { step: 'start', title: `Registre sua Entrada - ${pStart} pts` };
+    slideQR = { step: 'start', title: `Registre sua Entrada - ${pStart} pts` };
   } else if (currentSlide === middleSlide) {
-    activeQR = { step: 'middle', title: `Confirme sua Presença - ${pMiddle} pts` };
+    slideQR = { step: 'middle', title: `Confirme sua Presença - ${pMiddle} pts` };
   } else if (currentSlide === endSlide && total > 1) {
-    activeQR = { step: 'end', title: `Registre sua Saída - ${pEnd} pts` };
+    slideQR = { step: 'end', title: `Registre sua Saída - ${pEnd} pts` };
   }
 
   useEffect(() => {
-    if (activeQR && classData) {
-      const step = activeQR.step;
+    if (slideQR) {
+      setPersistentQR(slideQR);
+    }
+  }, [slideQR?.step]);
+
+  useEffect(() => {
+    if (timeLeft === 0) {
+      setPersistentQR(null);
+    }
+  }, [timeLeft]);
+
+  useEffect(() => {
+    if (persistentQR && classData) {
+      const step = persistentQR.step;
       const activeAt = classData[`qr_${step}_at`];
       if (!activeAt) {
         onActivateQR(step);
       }
     }
-  }, [activeQR, classData, onActivateQR]);
+  }, [persistentQR, classData, onActivateQR]);
 
   useEffect(() => {
-    if (!activeQR || !classData) {
+    if (!persistentQR || !classData) {
       setTimeLeft(null);
       return;
     }
-    const step = activeQR.step;
+    const step = persistentQR.step;
     const activeAt = classData[`qr_${step}_at`];
     const durationMinutes = classData.qr_duration_minutes || 10;
 
@@ -191,7 +204,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [activeQR, classData]);
+  }, [persistentQR, classData]);
 
   if (loading) {
     return (
@@ -220,15 +233,15 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   }
 
   // Filter recent scans for the currently active QR step
-  const recentScans = activeQR ? attendances
+  const recentScans = persistentQR ? attendances
     .filter(a => {
-      if (activeQR.step === 'start') return !!a.scan_start;
-      if (activeQR.step === 'middle') return !!a.scan_middle;
+      if (persistentQR.step === 'start') return !!a.scan_start;
+      if (persistentQR.step === 'middle') return !!a.scan_middle;
       return !!a.scan_end;
     })
     .sort((a, b) => {
-      const aTime = activeQR.step === 'start' ? a.scan_start : activeQR.step === 'middle' ? a.scan_middle : a.scan_end;
-      const bTime = activeQR.step === 'start' ? b.scan_start : activeQR.step === 'middle' ? b.scan_middle : b.scan_end;
+      const aTime = persistentQR.step === 'start' ? a.scan_start : persistentQR.step === 'middle' ? a.scan_middle : a.scan_end;
+      const bTime = persistentQR.step === 'start' ? b.scan_start : persistentQR.step === 'middle' ? b.scan_middle : b.scan_end;
       return bTime - aTime; // descending
     })
     .slice(0, 8) : []; // Max 8 recent names
@@ -274,13 +287,13 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
         />
 
         {/* QR Code Overlay via Slide trigger */}
-        {activeQR && (
+        {persistentQR && (
           <div className="absolute bottom-12 right-12 bg-white/95 backdrop-blur-md p-6 rounded-2xl shadow-2xl flex flex-col items-center animate-in fade-in slide-in-from-bottom-8 duration-500 w-80">
-            <h3 className="font-bold text-gray-900 mb-4">{activeQR.title}</h3>
+            <h3 className="font-bold text-gray-900 mb-4">{persistentQR.title}</h3>
             
             <div className="p-2 bg-white rounded-xl border border-gray-200 shadow-sm mb-4">
               <QRCodeSVG 
-                value={`${appUrl}/#/s/${classId}/${activeQR.step}`} 
+                value={`${appUrl}/#/s/${classId}/${persistentQR.step}`} 
                 size={200} 
                 level="H" 
                 includeMargin={false} 

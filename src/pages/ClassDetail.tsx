@@ -46,6 +46,7 @@ export function ClassDetail() {
   const [evalTitle, setEvalTitle] = useState('');
   const [evalQuestionTime, setEvalQuestionTime] = useState('30');
   const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', points: 10, alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+  const [justifyingId, setJustifyingId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<any>(null);
@@ -433,8 +434,6 @@ export function ClassDetail() {
       alert(err.message || 'Erro ao reexibir');
     }
   };
-
-  const [justifyingId, setJustifyingId] = useState<string | null>(null);
 
   const handleJustifyAttendance = async (identifier: string, justification: number) => {
     if (!classId) return;

@@ -2,8 +2,10 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { normalizeIdentifier } from '../lib/identifier';
-import { CheckCircle2, Clock, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2, HelpCircle } from 'lucide-react';
 import clsx from 'clsx';
+
+const STORAGE_KEY = (eid: string) => `participant_${eid}`;
 
 export function StudentQuiz() {
   const { evaluationId } = useParams();
@@ -11,7 +13,11 @@ export function StudentQuiz() {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [identifier, setIdentifier] = useState('');
-  const [participantId, setParticipantId] = useState<number | null>(null);
+  const [participantId, setParticipantId] = useState<number | null>(() => {
+    if (!evaluationId) return null;
+    const stored = localStorage.getItem(STORAGE_KEY(evaluationId));
+    return stored ? parseInt(stored, 10) : null;
+  });
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [selectedAlt, setSelectedAlt] = useState<number | null>(null);
@@ -28,7 +34,12 @@ export function StudentQuiz() {
       setLoading(false);
 
       if (data.status === 'completed') {
+        localStorage.removeItem(STORAGE_KEY(evaluationId));
         clearInterval(pollRef.current);
+      }
+
+      if (data.phase === 'question') {
+        setFeedback(null);
       }
 
       if (data.phase === 'result') {
@@ -62,13 +73,12 @@ export function StudentQuiz() {
   useEffect(() => {
     if (state?.phase === 'question') {
       setSelectedAlt(state?.my_answer || null);
-      setFeedback(null);
     }
   }, [state?.question?.id, state?.phase]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !identifier.trim()) return;
+    if (!name.trim() || !identifier.trim() || !evaluationId) return;
     setJoining(true);
     setJoinError('');
     try {
@@ -77,11 +87,20 @@ export function StudentQuiz() {
         identifier: normalizeIdentifier(identifier),
       });
       setParticipantId(participant.id);
+      localStorage.setItem(STORAGE_KEY(evaluationId), String(participant.id));
     } catch (err: any) {
       setJoinError(err.message || 'Erro ao entrar');
     } finally {
       setJoining(false);
     }
+  };
+
+  const handleLogout = () => {
+    if (!evaluationId) return;
+    localStorage.removeItem(STORAGE_KEY(evaluationId));
+    setParticipantId(null);
+    setState(null);
+    setLoading(true);
   };
 
   const handleAnswer = async (alternativeId: number) => {
@@ -101,13 +120,14 @@ export function StudentQuiz() {
     }
   };
 
+  // --- Tela de login ---
   if (!participantId) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-xl p-8 w-full max-w-md">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-teal-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-8 h-8 text-teal-600" />
+              <HelpCircle className="w-8 h-8 text-teal-600" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Avaliação</h1>
             <p className="text-gray-500 mt-1">Digite seus dados para entrar</p>
@@ -155,31 +175,63 @@ export function StudentQuiz() {
     );
   }
 
+  // --- Carregando estado ---
   if (!state || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
-      </div>
-    );
-  }
-
-  if (state.status === 'waiting') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-teal-600 animate-spin mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Aguardando...</h2>
-          <p className="text-gray-500">O questionário ainda não começou.</p>
+          <p className="text-gray-500">Conectando...</p>
         </div>
       </div>
     );
   }
 
+  // --- Aguardando início da avaliação ---
+  if (state.status === 'waiting') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 flex items-center justify-center p-4">
+        <div className="text-center max-w-sm">
+          <div className="relative w-20 h-20 mx-auto mb-6">
+            <div className="absolute inset-0 bg-teal-200 rounded-full animate-ping opacity-30" />
+            <div className="relative w-20 h-20 bg-teal-100 rounded-2xl flex items-center justify-center">
+              <Loader2 className="w-10 h-10 text-teal-600 animate-spin" />
+            </div>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Você está na sala!</h2>
+          <p className="text-gray-500 mb-1">
+            {state.evaluation?.question_count
+              ? `Aguardando o professor iniciar a avaliação (${state.evaluation.question_count} perguntas)...`
+              : 'Aguardando o professor iniciar a avaliação...'}
+          </p>
+          <div className="flex justify-center gap-1.5 mt-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="w-2 h-2 bg-teal-400 rounded-full animate-bounce"
+                style={{ animationDelay: `${i * 0.2}s` }}
+              />
+            ))}
+          </div>
+          <button
+            onClick={handleLogout}
+            className="mt-8 text-sm text-gray-400 hover:text-gray-600 underline"
+          >
+            Sair e entrar com outro identificador
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Avaliação finalizada ---
   if (state.status === 'completed') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-xl p-8 w-full max-w-md text-center">
-          <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 className="w-10 h-10 text-green-500" />
+          </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Avaliação Finalizada!</h2>
           <p className="text-gray-500">Obrigado por participar.</p>
         </div>
@@ -187,6 +239,7 @@ export function StudentQuiz() {
     );
   }
 
+  // --- Pergunta ---
   if (state.phase === 'question' && state.question) {
     const timerRunning = timeLeft !== null && timeLeft > 0;
     const pct = state.question_time > 0
@@ -255,7 +308,12 @@ export function StudentQuiz() {
     );
   }
 
+  // --- Resultado + aguardando próxima ---
   if (state.phase === 'result' && state.question) {
+    const hasNext = state.evaluation?.question_count
+      ? (state.question.order_index + 1) < state.evaluation.question_count
+      : true;
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 flex flex-col p-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
@@ -291,7 +349,7 @@ export function StudentQuiz() {
           </div>
         </div>
 
-        <div className="text-center">
+        <div className="text-center mb-6">
           <div className={clsx(
             "inline-flex items-center gap-2 px-6 py-3 rounded-full font-bold text-lg",
             feedback === 'correct' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
@@ -303,6 +361,24 @@ export function StudentQuiz() {
             )}
           </div>
         </div>
+
+        {state.status === 'active' && hasNext && (
+          <div className="text-center mt-auto">
+            <div className="flex items-center justify-center gap-2 text-teal-600 animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="font-medium text-sm">Aguardando próxima pergunta...</span>
+            </div>
+            <div className="flex justify-center gap-1.5 mt-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="w-1.5 h-1.5 bg-teal-400 rounded-full animate-bounce"
+                  style={{ animationDelay: `${i * 0.2}s` }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }

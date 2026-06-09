@@ -649,7 +649,14 @@ router.get('/evaluations/:id/state', async (req: Request, res: Response) => {
     const participantId = req.query.participant_id as string;
 
     if (evalRow.status === 'waiting') {
-      res.json({ status: 'waiting', evaluation: { id: evalRow.id, title: evalRow.title } });
+      const { rows: qCount } = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM questions WHERE evaluation_id = $1',
+        [req.params.id]
+      );
+      res.json({
+        status: 'waiting',
+        evaluation: { id: evalRow.id, title: evalRow.title, question_count: qCount[0]?.count || 0 },
+      });
       return;
     }
 
@@ -671,6 +678,8 @@ router.get('/evaluations/:id/state', async (req: Request, res: Response) => {
 
       const cq = questions[evalRow.current_question];
 
+      const totalQuestions = questions.length;
+
       if (evalRow.phase === 'question') {
         const { rows: alternatives } = await pool.query(
           `SELECT id, text, order_index FROM alternatives
@@ -691,8 +700,8 @@ router.get('/evaluations/:id/state', async (req: Request, res: Response) => {
         res.json({
           status: 'active',
           phase: 'question',
-          evaluation: { id: evalRow.id, title: evalRow.title },
-          question: { id: cq.id, text: cq.text, alternatives },
+          evaluation: { id: evalRow.id, title: evalRow.title, question_count: totalQuestions },
+          question: { id: cq.id, text: cq.text, order_index: cq.order_index, alternatives },
           phase_started_at: evalRow.phase_started_at,
           question_time: evalRow.question_time,
           my_answer: myAnswer,
@@ -724,10 +733,11 @@ router.get('/evaluations/:id/state', async (req: Request, res: Response) => {
         res.json({
           status: 'active',
           phase: 'result',
-          evaluation: { id: evalRow.id, title: evalRow.title },
+          evaluation: { id: evalRow.id, title: evalRow.title, question_count: totalQuestions },
           question: {
             id: cq.id,
             text: cq.text,
+            order_index: cq.order_index,
             alternatives: alternatives.map((a: any) => ({
               id: a.id,
               text: a.text,

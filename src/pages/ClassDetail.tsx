@@ -119,9 +119,9 @@ export function ClassDetail() {
       return Math.round((pStart + pMiddle + pEnd) * att.justification / 100);
     }
     let p = 0;
-    if (att?.scan_start) p += pStart;
-    if (att?.scan_middle) p += pMiddle;
-    if (att?.scan_end) p += pEnd;
+    if (att?.scan_start != null && Number(att.scan_start) > 0) p += pStart;
+    if (att?.scan_middle != null && Number(att.scan_middle) > 0) p += pMiddle;
+    if (att?.scan_end != null && Number(att.scan_end) > 0) p += pEnd;
     return p;
   };
 
@@ -251,7 +251,12 @@ export function ClassDetail() {
     if (registrations.length === 0) return;
     const headers = ['Nome Completo', 'CPF/Email', 'Função', 'Departamento', `Chegada (Início ${pStart})`, `Confirmação (Meio ${pMiddle})`, `Saída (Fim ${pEnd})`, 'Pontuação'];
     const escapeCsv = (val: any) => `"${String(val || '').replace(/"/g, '""')}"`;
-    const formatTime = (ts: number | undefined) => ts ? format(new Date(ts), 'HH:mm:ss') : 'Falta';
+    const formatTime = (ts: number | string | undefined | null) => {
+      if (ts == null) return 'Falta';
+      const num = Number(ts);
+      if (isNaN(num) || num <= 0) return 'Falta';
+      return format(new Date(num), 'HH:mm:ss');
+    };
 
     const rows = registrations.map(reg => {
       const att = attendances.find(a => a.identifier === reg.identifier);
@@ -282,10 +287,17 @@ export function ClassDetail() {
     if (registrations.length === 0) return;
     const dateStr = classData.date ? format(new Date(classData.date), "dd/MM/yyyy 'às' HH:mm") : '-';
     const esc = (v: any) => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
-    const fmt = (ts: number | undefined) => ts ? format(new Date(ts), 'HH:mm') : '—';
+    const fmt = (ts: number | string | undefined | null) => {
+      if (ts == null) return '—';
+      const num = Number(ts);
+      if (isNaN(num) || num <= 0) return '—';
+      return format(new Date(num), 'HH:mm');
+    };
 
     const bodyRows = registrations.map(reg => {
       const att = attendances.find(a => a.identifier === reg.identifier);
+      const es = evalScores.find(s => s.identifier === reg.identifier);
+      const evalPts = es ? `${es.total_score}/${es.total_possible}` : '—';
       return `<tr>
         <td>${esc(reg.full_name)}</td>
         <td>${esc(reg.identifier)}</td>
@@ -295,32 +307,49 @@ export function ClassDetail() {
         <td class="c">${fmt(att?.scan_middle)}</td>
         <td class="c">${fmt(att?.scan_end)}</td>
         <td class="c b">${calcPoints(att)}</td>
+        <td class="c">${evalPts}</td>
       </tr>`;
     }).join('');
 
+    const reportDate = format(new Date(), "dd/MM/yyyy 'às' HH:mm");
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
-      <title>Lista de Presença - ${esc(classData.title)}</title>
+      <title>Relatório de Presença - ${esc(classData.title)}</title>
       <style>
-        * { font-family: Arial, Helvetica, sans-serif; }
-        body { padding: 24px; color: #1f2937; }
-        h1 { font-size: 18px; margin: 0 0 4px; }
-        .sub { color: #6b7280; font-size: 12px; margin: 0 0 16px; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; }
-        th { background: #f3f4f6; }
+        * { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
+        body { padding: 32px; color: #1f2937; }
+        .header { text-align: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #0d9488; }
+        .header h1 { font-size: 20px; color: #0d9488; text-transform: uppercase; letter-spacing: 1px; }
+        .header h2 { font-size: 14px; color: #374151; font-weight: normal; margin-top: 4px; }
+        .header .meta { font-size: 11px; color: #6b7280; margin-top: 8px; }
+        .class-info { margin-bottom: 20px; }
+        .class-info h3 { font-size: 16px; color: #111827; }
+        .class-info .sub { color: #6b7280; font-size: 12px; margin-top: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { border: 1px solid #d1d5db; padding: 7px 8px; text-align: left; }
+        th { background: #0d9488; color: #fff; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
         td.c, th.c { text-align: center; }
         td.b { font-weight: bold; }
-        @media print { body { padding: 0; } }
+        tr:nth-child(even) { background: #f9fafb; }
+        .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #9ca3af; text-align: center; }
+        @media print { body { padding: 16px; } }
       </style></head><body>
-      <h1>Lista de Presença — ${esc(classData.title)}</h1>
-      <p class="sub">Data: ${dateStr} &nbsp;|&nbsp; Pontuação: Início ${pStart} / Meio ${pMiddle} / Fim ${pEnd} (total ${pTotal}) &nbsp;|&nbsp; ${registrations.length} aluno(s)</p>
+      <div class="header">
+        <h1>Câmara Municipal de Ourilândia do Norte</h1>
+        <h2>Sistema de Certificação e Presença</h2>
+        <p class="meta">Relatório gerado em ${reportDate}</p>
+      </div>
+      <div class="class-info">
+        <h3>${esc(classData.title)}</h3>
+        <p class="sub">Data da aula: ${dateStr} &nbsp;|&nbsp; Pontuação: Início ${pStart} / Meio ${pMiddle} / Fim ${pEnd} (total ${pTotal}) &nbsp;|&nbsp; ${registrations.length} aluno(s)</p>
+      </div>
       <table>
         <thead><tr>
-          <th>Nome</th><th>Identificação (CPF/Email)</th><th>Função</th><th>Departamento</th>
-          <th class="c">Início (${pStart})</th><th class="c">Meio (${pMiddle})</th><th class="c">Fim (${pEnd})</th><th class="c">Total</th>
+          <th>Nome</th><th>Identificação</th><th>Função</th><th>Departamento</th>
+          <th class="c">Início (${pStart})</th><th class="c">Meio (${pMiddle})</th><th class="c">Fim (${pEnd})</th><th class="c">Presença</th><th class="c">Nota</th>
         </tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
+      <div class="footer">Câmara Municipal de Ourilândia do Norte — Sistema de Certificação e Presença</div>
       <script>window.onload = function(){ window.print(); }<\/script>
       </body></html>`;
 
@@ -1180,13 +1209,14 @@ function QRCard({ title, description, url, step, attendances, activeAt, onActiva
     return () => clearInterval(interval);
   }, [activeAt, durationMinutes]);
 
+  const hasScan = (val: any) => val != null && Number(val) > 0;
   const recentScans = attendances.filter(a => {
-    if (step === 'start') return !!a.scan_start;
-    if (step === 'middle') return !!a.scan_middle;
-    return !!a.scan_end;
+    if (step === 'start') return hasScan(a.scan_start);
+    if (step === 'middle') return hasScan(a.scan_middle);
+    return hasScan(a.scan_end);
   }).sort((a, b) => {
-    const aTime = step === 'start' ? a.scan_start : step === 'middle' ? a.scan_middle : a.scan_end;
-    const bTime = step === 'start' ? b.scan_start : step === 'middle' ? b.scan_middle : b.scan_end;
+    const aTime = Number(step === 'start' ? a.scan_start : step === 'middle' ? a.scan_middle : a.scan_end);
+    const bTime = Number(step === 'start' ? b.scan_start : step === 'middle' ? b.scan_middle : b.scan_end);
     return bTime - aTime;
   }).slice(0, 5);
 

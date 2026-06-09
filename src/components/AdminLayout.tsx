@@ -51,15 +51,7 @@ export function AdminLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans overflow-x-hidden w-full relative">
-      <div className="bg-teal-900 text-teal-50 py-1.5 px-4 text-xs font-medium tracking-wide flex justify-between items-center sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto w-full flex flex-col sm:flex-row justify-between items-center gap-2">
-          <span className="text-center sm:text-left">Portal Oficial da Câmara Municipal</span>
-          <div className="flex gap-4">
-            <a href="#" className="hover:text-white transition-colors">Acessibilidade</a>
-            <a href="#" className="hover:text-white transition-colors">Transparência</a>
-          </div>
-        </div>
-      </div>
+      <div className="bg-teal-900 py-1.5 px-4 sm:px-6 lg:px-8"></div>
       
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm relative">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-500 to-teal-400"></div>

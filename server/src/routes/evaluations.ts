@@ -50,10 +50,18 @@ router.post('/classes/:classId/evaluations', authMiddleware, isCourseCreatorMidd
   try {
     await client.query('BEGIN');
 
+    // Detecta se a classe é online para definir o tipo da avaliação
+    const { rows: classRows } = await client.query(
+      'SELECT type FROM classes WHERE id = $1',
+      [req.params.classId]
+    );
+    const isOnline = classRows.length > 0 && classRows[0].type === 'online';
+    const evalType = isOnline ? 'online' : 'presential';
+
     const { rows: [evalRow] } = await client.query(
-      `INSERT INTO evaluations (class_id, title, question_time)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [req.params.classId, title.trim(), question_time || 30]
+      `INSERT INTO evaluations (class_id, title, question_time, type)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.params.classId, title.trim(), question_time || 30, evalType]
     );
 
     for (let i = 0; i < questions.length; i++) {
@@ -782,6 +790,256 @@ router.put('/evaluations/:evaluationId/participants/:participantId/justify', aut
   } catch (err) {
     console.error('Justify evaluation error:', err);
     res.status(500).json({ error: 'Erro ao justificar avaliação' });
+  }
+});
+
+// ─── Online Evaluation ─────────────────────────────────────────────────────
+
+// POST /api/evaluations/:id/online/start — Aluno inicia avaliação online
+// (verifica se concluiu slides com ≥60% de presença)
+router.post('/evaluations/:id/online/start', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { identifier } = req.body;
+
+  if (!identifier?.trim()) {
+    res.status(400).json({ error: 'Identificador é obrigatório' });
+    return;
+  }
+
+  const cleanIdentifier = normalizeIdentifier(identifier);
+
+  try {
+    // Verifica se a avaliação existe e é online
+    const { rows: evals } = await pool.query(
+      `SELECT e.*, cl.type AS class_type, cl.expected_duration_minutes
+       FROM evaluations e
+       JOIN classes cl ON e.class_id = cl.id
+       WHERE e.id = $1`,
+      [id]
+    );
+    if (evals.length === 0) {
+      res.status(404).json({ error: 'Avaliação não encontrada' });
+      return;
+    }
+
+    const evaluation = evals[0];
+    if (evaluation.class_type !== 'online') {
+      res.status(400).json({ error: 'Esta avaliação não é de uma aula online' });
+      return;
+    }
+    if (evaluation.status !== 'draft' && evaluation.status !== 'waiting') {
+      res.status(400).json({ error: 'Avaliação não disponível' });
+      return;
+    }
+
+    // Verifica se o aluno concluiu a aula online com ≥60% de presença
+    const { rows: progress } = await pool.query(
+      `SELECT * FROM class_online_progress
+       WHERE class_id = $1 AND identifier = $2 AND completed_at IS NOT NULL`,
+      [evaluation.class_id, cleanIdentifier]
+    );
+
+    if (progress.length === 0) {
+      res.status(403).json({ error: 'Conclua a leitura dos slides antes de fazer a avaliação' });
+      return;
+    }
+
+    const prog = progress[0];
+    const expectedMin = evaluation.expected_duration_minutes || 30;
+    const presencePct = Math.min(100, Math.round((prog.total_time_spent_seconds / 60 / expectedMin) * 100));
+
+    if (presencePct < 60) {
+      res.status(403).json({
+        error: `Presença insuficiente (${presencePct}%). Mínimo de 60% para realizar a avaliação.`,
+        presence_percentage: presencePct,
+      });
+      return;
+    }
+
+    // Cria/retorna participante
+    const { rows: [participant] } = await pool.query(
+      `INSERT INTO evaluation_participants (evaluation_id, identifier, name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (evaluation_id, identifier) DO UPDATE SET name = EXCLUDED.name
+       RETURNING *`,
+      [id, cleanIdentifier, prog.full_name]
+    );
+
+    res.json({
+      participant,
+      presence_percentage: presencePct,
+    });
+  } catch (err) {
+    console.error('Online evaluation start error:', err);
+    res.status(500).json({ error: 'Erro ao iniciar avaliação' });
+  }
+});
+
+// GET /api/evaluations/:id/online/questions — Retorna perguntas para o aluno
+router.get('/evaluations/:id/online/questions', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const identifier = req.query.identifier as string;
+
+  if (!identifier?.trim()) {
+    res.status(400).json({ error: 'Identificador é obrigatório' });
+    return;
+  }
+
+  const cleanIdentifier = normalizeIdentifier(identifier);
+
+  try {
+    // Verifica participante
+    const { rows: participants } = await pool.query(
+      `SELECT ep.*, e.type, e.status
+       FROM evaluation_participants ep
+       JOIN evaluations e ON e.id = ep.evaluation_id
+       WHERE ep.evaluation_id = $1 AND ep.identifier = $2`,
+      [id, cleanIdentifier]
+    );
+
+    if (participants.length === 0) {
+      res.status(404).json({ error: 'Participante não encontrado. Inicie a avaliação primeiro.' });
+      return;
+    }
+
+    const participant = participants[0];
+    if (participant.type !== 'online') {
+      res.status(400).json({ error: 'Avaliação não é online' });
+      return;
+    }
+
+    // Verifica se já respondeu
+    const { rows: existingAnswers } = await pool.query(
+      'SELECT question_id, alternative_id FROM student_answers WHERE participant_id = $1',
+      [participant.id]
+    );
+
+    if (existingAnswers.length > 0) {
+      // Já respondeu — retorna resultado
+      const totalScore = existingAnswers.reduce((sum, a) => sum + (a.is_correct ? 1 : 0), 0);
+      res.json({
+        already_answered: true,
+        total_score: totalScore,
+      });
+      return;
+    }
+
+    // Busca perguntas com alternativas
+    const { rows: questions } = await pool.query(
+      `SELECT q.id, q.text, q.points, q.order_index,
+              json_agg(
+                json_build_object('id', a.id, 'text', a.text, 'order_index', a.order_index)
+                ORDER BY a.order_index
+              ) AS alternatives
+       FROM questions q
+       LEFT JOIN alternatives a ON a.question_id = q.id
+       WHERE q.evaluation_id = $1
+       GROUP BY q.id, q.text, q.points, q.order_index
+       ORDER BY q.order_index`,
+      [id]
+    );
+
+    res.json({ questions });
+  } catch (err) {
+    console.error('Online questions error:', err);
+    res.status(500).json({ error: 'Erro ao buscar perguntas' });
+  }
+});
+
+// POST /api/evaluations/:id/online/submit — Envia respostas da avaliação online
+router.post('/evaluations/:id/online/submit', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { identifier, answers } = req.body;
+
+  if (!identifier?.trim() || !answers || !Array.isArray(answers)) {
+    res.status(400).json({ error: 'Identificador e respostas são obrigatórios' });
+    return;
+  }
+
+  const cleanIdentifier = normalizeIdentifier(identifier);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Busca participante
+    const { rows: participants } = await client.query(
+      `SELECT ep.* FROM evaluation_participants ep
+       WHERE ep.evaluation_id = $1 AND ep.identifier = $2
+       FOR UPDATE`,
+      [id, cleanIdentifier]
+    );
+
+    if (participants.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Participante não encontrado' });
+      return;
+    }
+
+    const participant = participants[0];
+
+    // Verifica se já respondeu
+    const { rows: existing } = await client.query(
+      'SELECT 1 FROM student_answers WHERE participant_id = $1 LIMIT 1',
+      [participant.id]
+    );
+    if (existing.length > 0) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'Você já respondeu esta avaliação' });
+      return;
+    }
+
+    // Busca todas as questões para validar as respostas
+    const { rows: questions } = await client.query(
+      `SELECT q.id, q.points, a.id AS correct_alternative_id
+       FROM questions q
+       LEFT JOIN alternatives a ON a.question_id = q.id AND a.is_correct = TRUE
+       WHERE q.evaluation_id = $1`,
+      [id]
+    );
+
+    const questionMap = new Map(questions.map((q: any) => [q.id, q]));
+
+    let totalScore = 0;
+    let totalPossible = 0;
+
+    for (const ans of answers) {
+      const qId = ans.question_id;
+      const altId = ans.alternative_id;
+      const question = questionMap.get(qId);
+
+      if (!question) continue; // skip invalid question IDs
+
+      const isCorrect = altId === question.correct_alternative_id;
+      const points = parseInt(question.points) || 0;
+      if (isCorrect) totalScore += points;
+      totalPossible += points;
+
+      await client.query(
+        `INSERT INTO student_answers (participant_id, evaluation_id, question_id, alternative_id)
+         VALUES ($1, $2, $3, $4)`,
+        [participant.id, id, qId, altId]
+      );
+    }
+
+    // Atualiza status da avaliação para completed se era waiting/draft
+    // (marca como completed apenas para este participante? Não — avaliação
+    //  online fica disponível e cada aluno a faz no seu ritmo)
+    await client.query('COMMIT');
+
+    const pct = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+
+    res.json({
+      total_score: totalScore,
+      total_possible: totalPossible,
+      percentage: pct,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Online submit error:', err);
+    res.status(500).json({ error: 'Erro ao enviar respostas' });
+  } finally {
+    client.release();
   }
 });
 

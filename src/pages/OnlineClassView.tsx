@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { normalizeIdentifier } from '../lib/identifier';
 import * as pdfjsLib from 'pdfjs-dist';
-import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award } from 'lucide-react';
 import clsx from 'clsx';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -19,7 +19,7 @@ function formatTime(seconds: number): string {
 
 export function OnlineClassView() {
   const { classId } = useParams();
-  const [step, setStep] = useState<'join' | 'loading' | 'viewing' | 'completed'>('join');
+  const [step, setStep] = useState<'join' | 'loading' | 'viewing' | 'completed' | 'evaluation'>('join');
 
   // Join form
   const [identifier, setIdentifier] = useState('');
@@ -33,6 +33,15 @@ export function OnlineClassView() {
   const [totalSlides, setTotalSlides] = useState(0);
   const [slideImages, setSlideImages] = useState<string[]>([]);
   const [presencePct, setPresencePct] = useState<number | null>(null);
+
+  // Evaluation state
+  const [evalQuestions, setEvalQuestions] = useState<any[]>([]);
+  const [evalParticipant, setEvalParticipant] = useState<any>(null);
+  const [evalAnswers, setEvalAnswers] = useState<Record<number, number>>({});
+  const [evalSubmitting, setEvalSubmitting] = useState(false);
+  const [evalResult, setEvalResult] = useState<any>(null);
+  const [evalError, setEvalError] = useState<string | null>(null);
+  const [loadEvalId, setLoadEvalId] = useState<number | null>(null);
 
   // Slide viewing
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -196,6 +205,68 @@ export function OnlineClassView() {
     }
   };
 
+  // Start evaluation
+  const handleStartEvaluation = async () => {
+    if (!classId) return;
+    setEvalError(null);
+    try {
+      // Encontra a primeira avaliação online vinculada a esta aula
+      const evals = await api.get(`/classes/${classId}/evaluations`);
+      const onlineEval = evals.find((e: any) => e.type === 'online');
+      if (!onlineEval) {
+        setEvalError('Nenhuma avaliação disponível para esta aula');
+        return;
+      }
+
+      // Inicia a avaliação
+      const startRes = await api.post(`/evaluations/${onlineEval.id}/online/start`, {
+        identifier: identifier.trim(),
+      });
+      setEvalParticipant(startRes.participant);
+      setLoadEvalId(onlineEval.id);
+
+      // Carrega perguntas
+      const qRes = await api.get(`/evaluations/${onlineEval.id}/online/questions?identifier=${encodeURIComponent(identifier.trim())}`);
+      if (qRes.already_answered) {
+        setEvalResult({ ...qRes, total_possible: qRes.total_possible || 1 });
+        setEvalQuestions([]);
+        setStep('evaluation');
+        return;
+      }
+      setEvalQuestions(qRes.questions || []);
+      setEvalAnswers({});
+      setStep('evaluation');
+    } catch (err: any) {
+      setEvalError(err?.response?.data?.error || 'Erro ao iniciar avaliação');
+    }
+  };
+
+  // Submit evaluation
+  const handleSubmitEvaluation = async () => {
+    if (!loadEvalId || !classId) return;
+    setEvalSubmitting(true);
+    setEvalError(null);
+    try {
+      const answers = Object.entries(evalAnswers).map(([qId, altIdx]) => {
+        const question = evalQuestions.find((q: any) => q.id === parseInt(qId));
+        const alt = question?.alternatives[altIdx];
+        return { question_id: parseInt(qId), alternative_id: alt?.id || null };
+      });
+
+      const res = await api.post(`/evaluations/${loadEvalId}/online/submit`, {
+        identifier: identifier.trim(),
+        answers,
+      });
+      setEvalResult(res);
+    } catch (err: any) {
+      setEvalError(err?.response?.data?.error || 'Erro ao enviar respostas');
+    } finally {
+      setEvalSubmitting(false);
+    }
+  };
+
+  const canAccessEval = (presencePct ?? 0) >= 60;
+
   // Joining screen
   if (step === 'join') {
     return (
@@ -303,12 +374,134 @@ export function OnlineClassView() {
               </p>
             </div>
 
+            {canAccessEval && (
+              <>
+                {evalError && (
+                  <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
+                    {evalError}
+                  </div>
+                )}
+                <button
+                  onClick={handleStartEvaluation}
+                  className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
+                >
+                  <HelpCircle className="w-5 h-5" /> Iniciar Avaliação
+                </button>
+              </>
+            )}
+
+            {!canAccessEval && (
+              <div className="p-3 bg-amber-50 text-amber-700 text-sm rounded-lg border border-amber-100">
+                Presença mínima de 60% necessária para realizar a avaliação.
+              </div>
+            )}
+
             <Link
               to="/"
-              className="block w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors"
+              className="block w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors"
             >
               Voltar ao Início
             </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Evaluation screen
+  if (step === 'evaluation') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-teal-600 to-teal-500 p-6 text-white">
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <HelpCircle className="w-6 h-6" /> Avaliação
+            </h1>
+            <p className="text-sm text-teal-100 mt-1">{classData?.title} — Responda todas as questões</p>
+          </div>
+
+          <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+            {evalResult ? (
+              <div className="text-center py-8">
+                <Award className="w-16 h-16 text-teal-500 mx-auto mb-4" />
+                <h2 className="text-2xl font-black text-gray-900 mb-2">
+                  {evalResult.percentage}%
+                </h2>
+                <p className="text-gray-500">
+                  {evalResult.total_score} de {evalResult.total_possible} pontos
+                </p>
+              </div>
+            ) : evalQuestions.length === 0 ? (
+              <p className="text-center text-gray-400 py-8">Carregando perguntas...</p>
+            ) : (
+              evalQuestions.map((q: any, qIdx: number) => {
+                const selectedAltIdx = evalAnswers[q.id] ?? -1;
+                return (
+                  <div key={q.id} className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+                    <div className="flex items-start justify-between mb-3">
+                      <h3 className="font-bold text-gray-900 text-sm leading-relaxed flex-1">
+                        <span className="text-teal-600 mr-2">{qIdx + 1}.</span>
+                        {q.text}
+                      </h3>
+                      <span className="text-xs font-medium text-gray-400 bg-white px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
+                        {q.points} pts
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {q.alternatives.map((alt: any, aIdx: number) => (
+                        <button
+                          key={alt.id}
+                          onClick={() => setEvalAnswers(prev => ({ ...prev, [q.id]: aIdx }))}
+                          className={clsx(
+                            'w-full text-left px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all',
+                            selectedAltIdx === aIdx
+                              ? 'border-teal-500 bg-teal-50 text-teal-800'
+                              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                          )}
+                        >
+                          <span className="mr-2 font-bold text-xs">
+                            {String.fromCharCode(65 + aIdx)}
+                          </span>
+                          {alt.text}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="p-6 border-t border-gray-100">
+            {evalError && (
+              <div className="mb-3 p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
+                {evalError}
+              </div>
+            )}
+            {evalResult ? (
+              <Link
+                to="/"
+                className="block w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold text-center transition-colors"
+              >
+                Voltar ao Início
+              </Link>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  {Object.keys(evalAnswers).length} de {evalQuestions.length} respondidas
+                </span>
+                <button
+                  onClick={handleSubmitEvaluation}
+                  disabled={evalSubmitting || Object.keys(evalAnswers).length < evalQuestions.length}
+                  className="px-8 py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-bold transition-colors flex items-center gap-2"
+                >
+                  {evalSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                  {evalSubmitting ? 'Enviando...' : 'Finalizar Avaliação'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

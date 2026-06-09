@@ -278,12 +278,13 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
       </div>
 
       {/* Main Slide Area */}
-      <div className="flex-1 w-full h-full relative flex items-center justify-center">
+      <div className="flex-1 w-full h-full relative bg-gray-50">
         {/* Slide Image */}
         <img 
           src={slides[currentSlide]} 
           alt={`Slide ${currentSlide + 1}`} 
-          className="max-w-full max-h-full object-contain shadow-2xl"
+          className="w-full h-full object-contain shadow-lg"
+          draggable={false}
         />
 
         {/* QR Code Overlay via Slide trigger */}

@@ -16,6 +16,7 @@ import { EvaluationSession } from './pages/EvaluationSession';
 import { StudentQuiz } from './pages/StudentQuiz';
 
 import { PreRegister } from './pages/PreRegister';
+import { MyPerformance } from './pages/MyPerformance';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -36,6 +37,7 @@ function Main() {
           <Route path="course/:courseId" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
           <Route path="course/:courseId/certificates" element={<ProtectedRoute><CertificateManager /></ProtectedRoute>} />
           <Route path="class/:classId" element={<ProtectedRoute><ClassDetail /></ProtectedRoute>} />
+          <Route path="me" element={<ProtectedRoute><MyPerformance /></ProtectedRoute>} />
         </Route>
         <Route path="/register/:classId" element={<RegisterClass />} />
         <Route path="/pre-register" element={<PreRegister />} />

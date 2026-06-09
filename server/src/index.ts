@@ -13,6 +13,7 @@ import settingsRoutes from './routes/settings.js';
 import usersRoutes from './routes/users.js';
 import publicRoutes from './routes/public.js';
 import evaluationsRoutes from './routes/evaluations.js';
+import meRoutes from './routes/me.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { UPLOAD_DIR } from './middleware/upload.js';
 
@@ -85,6 +86,7 @@ app.use('/api/certificates', certificatesRoutes);
 app.use('/api', evaluationsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/me', meRoutes);
 
 // ========================================
 // Health check

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, LogIn, LayoutDashboard, Settings as SettingsIcon, X, Loader2, KeyRound } from 'lucide-react';
+import { LogOut, LogIn, LayoutDashboard, Settings as SettingsIcon, X, Loader2, KeyRound, BarChart } from 'lucide-react';
 import { useSettings } from '../lib/useSettings';
 
 export function AdminLayout() {
@@ -87,6 +87,9 @@ export function AdminLayout() {
                     <SettingsIcon className="w-4 h-4" />
                   </Link>
                 )}
+                <Link to="/me" className="text-gray-500 hover:text-teal-700 transition-colors text-xs font-medium hidden md:flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-full shadow-sm hover:shadow" title="Meu Desempenho">
+                  <BarChart className="w-3.5 h-3.5" /> Meu Desempenho
+                </Link>
                 <span className="text-sm font-medium text-gray-700 hidden md:inline-block px-2">{user.name}</span>
                 <button onClick={logout} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors bg-white rounded-full shadow-sm hover:shadow" title="Sair">
                   <LogOut className="w-4 h-4" />

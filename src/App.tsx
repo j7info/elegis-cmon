@@ -17,6 +17,7 @@ import { StudentQuiz } from './pages/StudentQuiz';
 
 import { PreRegister } from './pages/PreRegister';
 import { MyPerformance } from './pages/MyPerformance';
+import { OnlineClassView } from './pages/OnlineClassView';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -48,6 +49,7 @@ function Main() {
         <Route path="/verify/:tokenParam" element={<VerifyCertificate />} />
         <Route path="/evaluation/:evaluationId/session" element={<ProtectedRoute><EvaluationSession /></ProtectedRoute>} />
         <Route path="/quiz/:evaluationId" element={<StudentQuiz />} />
+        <Route path="/online-class/:classId" element={<OnlineClassView />} />
       </Routes>
     </Router>
   );

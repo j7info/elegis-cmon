@@ -54,7 +54,7 @@ router.get('/course/:courseId', authMiddleware, async (req: AuthRequest, res: Re
 
 // POST /api/classes — Criar aula
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end } = req.body;
+  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds } = req.body;
 
   if (!course_id || !title?.trim()) {
     res.status(400).json({ error: 'course_id e title são obrigatórios' });
@@ -69,11 +69,12 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO classes (course_id, title, description, date, qr_duration_minutes, owner_id, status, auxiliary_teacher_id, points_start, points_middle, points_end)
-       VALUES ($1, $2, $3, NOW(), $4, $5, 'scheduled', $6, $7, $8, $9) RETURNING *`,
+      `INSERT INTO classes (course_id, title, description, date, qr_duration_minutes, owner_id, status, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds)
+       VALUES ($1, $2, $3, NOW(), $4, $5, 'scheduled', $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [
         course_id, title.trim(), description?.trim() || '', qr_duration_minutes || 10, req.user!.id, auxiliary_teacher_id || null,
         points_start ?? 40, points_middle ?? 30, points_end ?? 30,
+        type || 'presential', expected_duration_minutes || null, slide_minimum_seconds || 30,
       ]
     );
     res.status(201).json(rows[0]);
@@ -107,6 +108,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       points_start: classData.points_start,
       points_middle: classData.points_middle,
       points_end: classData.points_end,
+      type: classData.type,
+      expected_duration_minutes: classData.expected_duration_minutes,
+      slide_minimum_seconds: classData.slide_minimum_seconds,
     });
   } catch (err) {
     console.error('Get class error:', err);
@@ -116,7 +120,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // PUT /api/classes/:id — Atualizar aula (status, QR timestamps)
 router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id, points_start, points_middle, points_end } = req.body;
+  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds } = req.body;
 
   try {
     const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
@@ -176,6 +180,18 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
     if (points_end !== undefined) {
       setClauses.push(`points_end = $${paramIdx++}`);
       values.push(points_end);
+    }
+    if (type !== undefined) {
+      setClauses.push(`type = $${paramIdx++}`);
+      values.push(type);
+    }
+    if (expected_duration_minutes !== undefined) {
+      setClauses.push(`expected_duration_minutes = $${paramIdx++}`);
+      values.push(expected_duration_minutes);
+    }
+    if (slide_minimum_seconds !== undefined) {
+      setClauses.push(`slide_minimum_seconds = $${paramIdx++}`);
+      values.push(slide_minimum_seconds);
     }
 
     values.push(req.params.id);

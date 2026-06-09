@@ -14,6 +14,7 @@ import usersRoutes from './routes/users.js';
 import publicRoutes from './routes/public.js';
 import evaluationsRoutes from './routes/evaluations.js';
 import meRoutes from './routes/me.js';
+import onlineClassesRoutes from './routes/onlineClasses.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { UPLOAD_DIR } from './middleware/upload.js';
 
@@ -82,6 +83,7 @@ app.use('/api/courses', coursesRoutes);
 app.use('/api/classes', classesRoutes);
 app.use('/api/classes', registrationsRoutes);   // /api/classes/:classId/registrations
 app.use('/api/classes', attendancesRoutes);      // /api/classes/:classId/scan/:step
+app.use('/api/classes', onlineClassesRoutes);    // /api/classes/:classId/online/*
 app.use('/api/certificates', certificatesRoutes);
 app.use('/api', evaluationsRoutes);
 app.use('/api/settings', settingsRoutes);

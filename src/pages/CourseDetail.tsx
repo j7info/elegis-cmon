@@ -24,6 +24,9 @@ export function CourseDetail() {
   const [pointsEnd, setPointsEnd] = useState('30');
   const [studentsReport, setStudentsReport] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [newClassType, setNewClassType] = useState<'presential' | 'online'>('presential');
+  const [newExpectedDuration, setNewExpectedDuration] = useState('30');
+  const [newSlideMinSeconds, setNewSlideMinSeconds] = useState('30');
 
   const loadData = async () => {
     if (!courseId) return;
@@ -63,6 +66,9 @@ export function CourseDetail() {
         points_start: parseInt(pointsStart, 10) || 0,
         points_middle: parseInt(pointsMiddle, 10) || 0,
         points_end: parseInt(pointsEnd, 10) || 0,
+        type: newClassType,
+        expected_duration_minutes: newClassType === 'online' ? (parseInt(newExpectedDuration, 10) || 30) : null,
+        slide_minimum_seconds: newClassType === 'online' ? (parseInt(newSlideMinSeconds, 10) || 30) : null,
       });
 
       // Anexa o PDF de apresentação, se selecionado
@@ -171,6 +177,71 @@ export function CourseDetail() {
                 </select>
               </div>
 
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo de Aula</label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setNewClassType('presential')}
+                    className={clsx(
+                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                      newClassType === 'presential'
+                        ? 'border-teal-500 bg-teal-50 text-teal-700'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    Presencial
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewClassType('online')}
+                    className={clsx(
+                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                      newClassType === 'online'
+                        ? 'border-teal-500 bg-teal-50 text-teal-700'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    Online
+                  </button>
+                </div>
+              </div>
+
+              {newClassType === 'online' && (
+                <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <div>
+                    <label className="block text-sm font-medium text-blue-800 mb-1">Tempo esperado total</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={newExpectedDuration}
+                        onChange={e => setNewExpectedDuration(e.target.value)}
+                        className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
+                        min="1"
+                        required
+                      />
+                      <span className="text-sm text-blue-600 font-medium flex-shrink-0">min</span>
+                    </div>
+                    <p className="text-xs text-blue-500 mt-1">Para calcular % de presença</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-blue-800 mb-1">Mínimo por slide</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={newSlideMinSeconds}
+                        onChange={e => setNewSlideMinSeconds(e.target.value)}
+                        className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
+                        min="1"
+                        required
+                      />
+                      <span className="text-sm text-blue-600 font-medium flex-shrink-0">seg</span>
+                    </div>
+                    <p className="text-xs text-blue-500 mt-1">Trava para avançar slide</p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium text-gray-700">Pontuação da Aula</label>
                 <div className="grid grid-cols-3 gap-3">
@@ -232,6 +303,7 @@ export function CourseDetail() {
                         <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
                         <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                           <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                          {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
                         </div>
                       </div>
                       <div className="flex items-center gap-4">

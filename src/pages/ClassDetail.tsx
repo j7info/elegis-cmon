@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -38,6 +38,11 @@ export function ClassDetail() {
   const [pointsStartInput, setPointsStartInput] = useState('40');
   const [pointsMiddleInput, setPointsMiddleInput] = useState('30');
   const [pointsEndInput, setPointsEndInput] = useState('30');
+
+  // Online class settings
+  const [editType, setEditType] = useState<'presential' | 'online'>('presential');
+  const [editExpectedDuration, setEditExpectedDuration] = useState('30');
+  const [editSlideMinSeconds, setEditSlideMinSeconds] = useState('30');
 
   // Evaluation state
   const [evaluations, setEvaluations] = useState<any[]>([]);
@@ -154,6 +159,9 @@ export function ClassDetail() {
     setEditPdfFile(null);
     setRemovePdf(false);
     setIsEditingClass(true);
+    setEditType(classData.type || 'presential');
+    setEditExpectedDuration(String(classData.expected_duration_minutes ?? 30));
+    setEditSlideMinSeconds(String(classData.slide_minimum_seconds ?? 30));
     
     // Load users if empty
     if (allUsers.length === 0) {
@@ -176,6 +184,9 @@ export function ClassDetail() {
         description: editDescription.trim(),
         date: combinedDate,
         auxiliary_teacher_id: editAuxTeacherId ? parseInt(editAuxTeacherId) : null,
+        type: editType,
+        expected_duration_minutes: editType === 'online' ? (parseInt(editExpectedDuration) || 30) : null,
+        slide_minimum_seconds: editType === 'online' ? (parseInt(editSlideMinSeconds) || 30) : null,
       });
       // Remove o PDF se solicitado
       if (removePdf) {
@@ -556,10 +567,10 @@ export function ClassDetail() {
         </div>
       </div>
 
-      {classData.status === 'scheduled' && (
+      {classData.status === 'scheduled' && classData.type !== 'online' && (
         <div className="bg-teal-50 border border-teal-100 p-6 rounded-xl text-teal-800 flex flex-col items-center justify-center text-center">
           <LinkIcon className="w-10 h-10 text-teal-400 mb-3" />
-          <h3 className="text-lg font-bold mb-1">A aula está agendada</h3>
+          <h3 className="text-lg font-bold mb-1">Aula presencial agendada</h3>
           <p className="text-teal-600 mb-6">Compartilhe o link de cadastro com os alunos antes de iniciar a aula.</p>
           <div className="flex bg-white rounded-lg border border-teal-200 overflow-hidden shadow-sm">
             <input type="text" readOnly value={registrationUrl} className="px-4 py-3 outline-none text-gray-500 w-80 text-sm" />
@@ -570,7 +581,19 @@ export function ClassDetail() {
         </div>
       )}
 
-      {classData.status === 'active' && (
+      {classData.status === 'scheduled' && classData.type === 'online' && (
+        <div className="bg-blue-50 border border-blue-100 p-6 rounded-xl text-blue-800 flex flex-col items-center justify-center text-center">
+          <BookOpen className="w-10 h-10 text-blue-400 mb-3" />
+          <h3 className="text-lg font-bold mb-1">Aula online agendada</h3>
+          <p className="text-blue-600 mb-2">Após iniciar a aula, os alunos poderão acessar os slides remotamente.</p>
+          <p className="text-xs text-blue-500 mb-6">
+            Tempo esperado: {classData.expected_duration_minutes || 30} min · {' '}
+            Mínimo por slide: {classData.slide_minimum_seconds || 30}s
+          </p>
+        </div>
+      )}
+
+      {classData.status === 'active' && classData.type !== 'online' && (
         <div className="grid md:grid-cols-3 gap-6">
           <QRCard
             url={`${appUrl}/#/s/${classId}/start`}
@@ -602,6 +625,36 @@ export function ClassDetail() {
             onActivate={() => activateQRStep('end')}
             durationMinutes={classData.qr_duration_minutes || 10}
           />
+        </div>
+      )}
+
+      {classData.status === 'active' && classData.type === 'online' && (
+        <div className="bg-teal-50 border border-teal-200 p-6 rounded-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <BookOpen className="w-5 h-5 text-teal-600" />
+            <h3 className="font-semibold text-teal-800">Aula Online disponível</h3>
+          </div>
+          <p className="text-sm text-teal-600 mb-4">
+            Compartilhe o link abaixo com os alunos. Eles acessarão os slides diretamente no navegador.
+          </p>
+          <p className="text-xs text-teal-500 mb-3">
+            Presença calculada por tempo de leitura · Esperado: {classData.expected_duration_minutes || 30} min · {' '}
+            Mínimo por slide: {classData.slide_minimum_seconds || 30}s
+          </p>
+          <div className="flex bg-white rounded-lg border border-teal-200 overflow-hidden shadow-sm">
+            <input
+              type="text"
+              readOnly
+              value={`${appUrl}/#/online-class/${classId}`}
+              className="px-4 py-3 outline-none text-gray-500 w-full text-sm"
+            />
+            <button
+              onClick={copyLink}
+              className="px-6 py-3 bg-teal-600 text-white font-medium hover:bg-teal-700 transition-colors flex-shrink-0"
+            >
+              {linkCopied ? 'Copiado!' : 'Copiar'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -950,6 +1003,71 @@ export function ClassDetail() {
                   required
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Aula</label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditType('presential')}
+                    className={clsx(
+                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                      editType === 'presential'
+                        ? 'border-teal-500 bg-teal-50 text-teal-700'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    Presencial
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditType('online')}
+                    className={clsx(
+                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                      editType === 'online'
+                        ? 'border-teal-500 bg-teal-50 text-teal-700'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    Online
+                  </button>
+                </div>
+              </div>
+
+              {editType === 'online' && (
+                <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <div>
+                    <label className="block text-sm font-medium text-blue-800 mb-1">Tempo esperado total</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={editExpectedDuration}
+                        onChange={e => setEditExpectedDuration(e.target.value)}
+                        className="w-full px-4 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
+                        min="1"
+                        required
+                      />
+                      <span className="text-sm text-blue-600 font-medium flex-shrink-0">minutos</span>
+                    </div>
+                    <p className="text-xs text-blue-500 mt-1">Tempo total para ler todos os slides</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-blue-800 mb-1">Tempo mínimo por slide</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={editSlideMinSeconds}
+                        onChange={e => setEditSlideMinSeconds(e.target.value)}
+                        className="w-full px-4 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
+                        min="1"
+                        required
+                      />
+                      <span className="text-sm text-blue-600 font-medium flex-shrink-0">segundos</span>
+                    </div>
+                    <p className="text-xs text-blue-500 mt-1">Mínimo antes de avançar ao próximo slide</p>
+                  </div>
+                </div>
+              )}
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>

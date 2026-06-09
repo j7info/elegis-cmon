@@ -341,4 +341,41 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
   }
 });
 
+// GET /api/classes/:id/evaluation-scores — Pontuação de avaliações por aluno nesta aula
+router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
+  try {
+    const { rows: evaluations } = await pool.query(
+      'SELECT id FROM evaluations WHERE class_id = $1',
+      [req.params.id]
+    );
+
+    if (evaluations.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    const evalIds = evaluations.map((e: any) => e.id);
+
+    const { rows } = await pool.query(
+      `SELECT
+         ep.identifier,
+         ep.name,
+         SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END) AS total_score,
+         SUM(q.points) AS total_possible
+       FROM student_answers sa
+       JOIN evaluation_participants ep ON sa.participant_id = ep.id
+       JOIN alternatives a ON sa.alternative_id = a.id
+       JOIN questions q ON sa.question_id = q.id
+       WHERE sa.evaluation_id = ANY($1::int[])
+       GROUP BY ep.identifier, ep.name`,
+      [evalIds]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Evaluation scores error:', err);
+    res.status(500).json({ error: 'Erro ao buscar notas' });
+  }
+});
+
 export default router;

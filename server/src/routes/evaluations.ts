@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isCourseCreatorMiddleware } from '../middleware/auth.js';
+import { normalizeIdentifier } from '../lib/identifier.js';
 
 const router = Router();
 
@@ -62,9 +63,9 @@ router.post('/classes/:classId/evaluations', authMiddleware, isCourseCreatorMidd
       }
 
       const { rows: [qRow] } = await client.query(
-        `INSERT INTO questions (evaluation_id, text, order_index)
-         VALUES ($1, $2, $3) RETURNING *`,
-        [evalRow.id, q.text.trim(), i]
+        `INSERT INTO questions (evaluation_id, text, order_index, points)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [evalRow.id, q.text.trim(), i, q.points || 10]
       );
 
       for (let j = 0; j < q.alternatives.length; j++) {
@@ -178,9 +179,9 @@ router.put('/evaluations/:id', authMiddleware, isCourseCreatorMiddleware, async 
           }
 
           const { rows: [qRow] } = await client.query(
-            `INSERT INTO questions (evaluation_id, text, order_index)
-             VALUES ($1, $2, $3) RETURNING *`,
-            [req.params.id, q.text.trim(), i]
+            `INSERT INTO questions (evaluation_id, text, order_index, points)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [req.params.id, q.text.trim(), i, q.points || 10]
           );
 
           for (let j = 0; j < q.alternatives.length; j++) {
@@ -473,7 +474,7 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
         );
 
         allResults.push({
-          question: { id: q.id, text: q.text, order_index: q.order_index },
+          question: { id: q.id, text: q.text, order_index: q.order_index, points: q.points },
           alternatives_stats: qAlts.map((alt: any) => ({
             ...alt,
             count: answers.filter((a: any) => a.alternative_id === alt.id).length,
@@ -498,6 +499,25 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
       participantAnswers = ans;
     }
 
+    // Pontuação total de cada aluno
+    interface ScoreRow { participant_id: number; total_score: number; total_possible: number; }
+    let studentScores: ScoreRow[] = [];
+    if (evalRow.status === 'completed' || evalRow.status === 'active') {
+      const { rows: scores } = await pool.query(
+        `SELECT
+           sa.participant_id,
+           SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END) AS total_score,
+           SUM(q.points) AS total_possible
+         FROM student_answers sa
+         JOIN alternatives a ON sa.alternative_id = a.id
+         JOIN questions q ON sa.question_id = q.id
+         WHERE sa.evaluation_id = $1
+         GROUP BY sa.participant_id`,
+        [req.params.id]
+      );
+      studentScores = scores;
+    }
+
     res.json({
       evaluation: evalRow,
       questions: questions.map((q: any) => ({
@@ -509,6 +529,7 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
       result_data: resultData,
       participant_answers: participantAnswers,
       all_results: allResults,
+      student_scores: studentScores,
     });
   } catch (err) {
     console.error('Get session error:', err);
@@ -525,6 +546,8 @@ router.post('/evaluations/:id/join', async (req: Request, res: Response) => {
       return;
     }
 
+    const cleanId = normalizeIdentifier(identifier);
+
     const { rows: [evalRow] } = await pool.query(
       'SELECT * FROM evaluations WHERE id = $1 AND status = $2',
       [req.params.id, 'waiting']
@@ -534,12 +557,26 @@ router.post('/evaluations/:id/join', async (req: Request, res: Response) => {
       return;
     }
 
+    // Tenta auto-vincular com a matrícula no curso pelo CPF/email
+    const { rows: registrations } = await pool.query(
+      `SELECT r.full_name, r.identifier FROM registrations r
+       JOIN classes cl ON r.class_id = cl.id
+       WHERE cl.id = $1 AND r.identifier = $2
+       LIMIT 1`,
+      [evalRow.class_id, cleanId]
+    );
+
+    let studentName = name.trim();
+    if (registrations.length > 0) {
+      studentName = registrations[0].full_name;
+    }
+
     const { rows: [participant] } = await pool.query(
       `INSERT INTO evaluation_participants (evaluation_id, name, identifier)
        VALUES ($1, $2, $3)
        ON CONFLICT (evaluation_id, identifier) DO UPDATE SET name = EXCLUDED.name
        RETURNING *`,
-      [req.params.id, name.trim(), identifier.trim()]
+      [req.params.id, studentName, cleanId]
     );
 
     res.json(participant);

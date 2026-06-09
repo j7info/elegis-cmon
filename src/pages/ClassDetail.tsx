@@ -18,6 +18,7 @@ export function ClassDetail() {
   const [classData, setClassData] = useState<any>(null);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
+  const [evalScores, setEvalScores] = useState<any[]>([]);
   const [presentationFile, setPresentationFile] = useState<File | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   
@@ -44,7 +45,7 @@ export function ClassDetail() {
   const [editingEvalId, setEditingEvalId] = useState<number | null>(null);
   const [evalTitle, setEvalTitle] = useState('');
   const [evalQuestionTime, setEvalQuestionTime] = useState('30');
-  const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+  const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', points: 10, alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<any>(null);
@@ -62,6 +63,10 @@ export function ClassDetail() {
       setClassData(cls);
       setAttendances(atts);
       setRegistrations(studs);
+      try {
+        const scores = await api.get(`/classes/${classId}/evaluation-scores`);
+        setEvalScores(scores);
+      } catch (err) {} // Ignore if no evaluations yet
       if (cls.qr_duration_minutes && !editingDuration) {
         setDurationInput(String(cls.qr_duration_minutes));
       }
@@ -311,7 +316,7 @@ export function ClassDetail() {
   };
 
   const handleAddQuestion = () => {
-    setEvalQuestions([...evalQuestions, { text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+    setEvalQuestions([...evalQuestions, { text: '', points: 10, alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
   };
 
   const handleRemoveQuestion = (idx: number) => {
@@ -342,7 +347,7 @@ export function ClassDetail() {
   const resetEvalForm = () => {
     setEvalTitle('');
     setEvalQuestionTime('30');
-    setEvalQuestions([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+    setEvalQuestions([{ text: '', points: 10, alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
     setEditingEvalId(null);
   };
 
@@ -358,6 +363,7 @@ export function ClassDetail() {
       setEvalQuestionTime(String(data.question_time || 30));
       setEvalQuestions(data.questions.map((q: any) => ({
         text: q.text,
+        points: q.points || 10,
         alternatives: q.alternatives.map((a: any) => ({
           text: a.text,
           is_correct: a.is_correct || false,
@@ -376,6 +382,7 @@ export function ClassDetail() {
 
     const questions = evalQuestions.map(q => ({
       text: q.text,
+      points: parseInt(q.points) || 10,
       alternatives: q.alternatives.map((a: any) => ({
         text: a.text,
         is_correct: a.is_correct || false,
@@ -621,11 +628,12 @@ export function ClassDetail() {
                 <th className="px-4 py-3 text-gray-700 text-center">Meio ({pMiddle})</th>
                 <th className="px-4 py-3 text-gray-700 text-center">Fim ({pEnd})</th>
                 <th className="px-4 py-3 text-gray-700 text-center font-bold">Total</th>
+                <th className="px-4 py-3 text-gray-700 text-center">Avaliação</th>
               </tr>
             </thead>
             <tbody>
               {registrations.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
               ) : (
                 registrations.map(reg => {
                   const att = attendances.find(a => a.identifier === reg.identifier);
@@ -644,6 +652,18 @@ export function ClassDetail() {
                         {att?.scan_end ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
                       </td>
                       <td className="px-4 py-3 text-center font-bold text-teal-600">{p}</td>
+                      <td className="px-4 py-3 text-center">
+                        {(() => {
+                          const es = evalScores.find(s => s.identifier === reg.identifier);
+                          if (es) {
+                            const pts = parseInt(es.total_score);
+                            const maxPts = parseInt(es.total_possible);
+                            const pct = maxPts > 0 ? Math.round((pts / maxPts) * 100) : 0;
+                            return <span className={clsx("text-xs font-bold", pts > 0 ? "text-teal-600" : "text-gray-400")}>{pts}/{maxPts} ({pct}%)</span>;
+                          }
+                          return <span className="text-gray-300">-</span>;
+                        })()}
+                      </td>
                     </tr>
                   )
                 })
@@ -794,10 +814,25 @@ export function ClassDetail() {
                     <textarea
                       value={q.text}
                       onChange={e => handleQuestionChange(qIdx, e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-20 resize-none mb-3"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-20 resize-none mb-2"
                       placeholder="Digite a pergunta..."
                       required
                     />
+                    <div className="flex items-center gap-2 mb-3">
+                      <label className="text-xs font-medium text-gray-500">Valor:</label>
+                      <input
+                        type="number"
+                        value={q.points}
+                        onChange={e => {
+                          const updated = [...evalQuestions];
+                          updated[qIdx] = { ...updated[qIdx], points: parseInt(e.target.value) || 0 };
+                          setEvalQuestions(updated);
+                        }}
+                        className="w-20 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none text-center"
+                        min="0"
+                      />
+                      <span className="text-xs text-gray-400">pts</span>
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                       {q.alternatives.map((alt: any, aIdx: number) => (
                         <div key={aIdx} className="flex items-center gap-2">

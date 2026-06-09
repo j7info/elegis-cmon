@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware } from '../middleware/auth.js';
+import { normalizeIdentifier } from '../lib/identifier.js';
 
 const router = Router();
 
@@ -170,20 +171,26 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Identificador obrigatório' });
     return;
   }
+  const clean = normalizeIdentifier(identifier);
   try {
-    // 1. Busca aluno
-    const { rows: users } = await pool.query('SELECT id, name, cpf, email, departamento, cargo FROM app_users WHERE cpf = $1 OR email = $1', [identifier]);
+    // 1. Busca aluno (normaliza também o valor do banco)
+    const { rows: users } = await pool.query(
+      `SELECT id, name, cpf, email, departamento, cargo FROM app_users
+       WHERE cpf = $1 OR email = $1`,
+      [clean]
+    );
     if (users.length === 0) {
       res.status(404).json({ error: 'USER_NOT_FOUND' });
       return;
     }
     const user = users[0];
 
-    // 2. Registra
+    // 2. Registra com identificador normalizado
+    const storedIdentifier = normalizeIdentifier(user.cpf || user.email);
     await pool.query(
       `INSERT INTO registrations (course_id, identifier, full_name, role, department)
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (course_id, identifier) DO NOTHING`,
-      [req.params.id, user.cpf || user.email, user.name, user.cargo, user.departamento]
+      [req.params.id, storedIdentifier, user.name, user.cargo, user.departamento]
     );
     res.json({ message: 'Inscrito com sucesso' });
   } catch (err) {

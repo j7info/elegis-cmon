@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db/pool.js';
+import { normalizeIdentifier } from '../lib/identifier.js';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ router.post('/:classId/scan/:step', async (req: Request, res: Response) => {
     return;
   }
 
-  const cleanIdentifier = identifier.trim().toLowerCase();
+  const cleanIdentifier = normalizeIdentifier(identifier);
 
   try {
     // 1. Get class data

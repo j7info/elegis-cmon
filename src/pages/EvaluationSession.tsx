@@ -62,7 +62,7 @@ export function EvaluationSession() {
     return <div className="p-8 text-center text-gray-500">Avaliação não encontrada</div>;
   }
 
-  const { evaluation, participants, current_question, result_data, participant_answers, questions, all_results } = session;
+  const { evaluation, participants, current_question, result_data, participant_answers, questions, all_results, student_scores } = session;
   const totalQuestions = questions?.length || 0;
   const answeredCount = participant_answers?.length || 0;
 
@@ -328,6 +328,47 @@ export function EvaluationSession() {
                 </div>
               </div>
             ))}
+
+            {student_scores && student_scores.length > 0 && (
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div className="flex items-center gap-2 mb-4">
+                  <Award className="w-5 h-5 text-teal-600" />
+                  <h3 className="font-bold text-gray-900">Pontuação dos Alunos</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="px-3 py-2 text-left text-gray-500 font-medium">Aluno</th>
+                        <th className="px-3 py-2 text-center text-gray-500 font-medium">Nota</th>
+                        <th className="px-3 py-2 text-center text-gray-500 font-medium">Total possível</th>
+                        <th className="px-3 py-2 text-center text-gray-500 font-medium">Aproveitamento</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {participants.map((p: any) => {
+                        const score = student_scores.find((s: any) => s.participant_id === p.id);
+                        const pts = score ? parseInt(score.total_score) : 0;
+                        const maxPts = score ? parseInt(score.total_possible) : 0;
+                        const pct = maxPts > 0 ? Math.round((pts / maxPts) * 100) : 0;
+                        return (
+                          <tr key={p.id} className="border-b border-gray-50">
+                            <td className="px-3 py-2 font-medium text-gray-800">{p.name}</td>
+                            <td className="px-3 py-2 text-center font-bold text-teal-600">{pts}</td>
+                            <td className="px-3 py-2 text-center text-gray-500">{maxPts}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={clsx("px-2 py-0.5 rounded-full text-xs font-bold", pct >= 70 ? "bg-green-100 text-green-700" : pct >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
+                                {pct}%
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="text-center">
               <button

@@ -28,20 +28,17 @@ async function getEvaluationScoresByClass(classIds: number[]): Promise<Map<strin
   if (evaluations.length === 0) return new Map();
 
   const evalIds = evaluations.map((e: any) => e.id);
-  const evalClassMap = new Map<number, number>();
-  for (const e of evaluations) {
-    evalClassMap.set(e.id, e.class_id);
-  }
 
   const { rows: scores } = await pool.query(
     `SELECT
        ep.identifier,
        sa.evaluation_id,
-       COUNT(*) FILTER (WHERE a.is_correct) AS correct_count,
-       COUNT(*) AS total_count
+       SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END) AS total_score,
+       SUM(q.points) AS total_possible
      FROM student_answers sa
      JOIN evaluation_participants ep ON sa.participant_id = ep.id
      JOIN alternatives a ON sa.alternative_id = a.id
+     JOIN questions q ON sa.question_id = q.id
      WHERE sa.evaluation_id = ANY($1::int[])
      GROUP BY ep.identifier, sa.evaluation_id`,
     [evalIds]
@@ -49,7 +46,9 @@ async function getEvaluationScoresByClass(classIds: number[]): Promise<Map<strin
 
   const scoreMap = new Map<string, number>();
   for (const s of scores) {
-    const pct = s.total_count > 0 ? Math.round((s.correct_count / s.total_count) * 100) : 0;
+    const pts = parseInt(s.total_score) || 0;
+    const maxPts = parseInt(s.total_possible) || 1;
+    const pct = Math.round((pts / maxPts) * 100);
     const key = `${s.identifier}`;
     const current = scoreMap.get(key) || 0;
     scoreMap.set(key, current + pct);

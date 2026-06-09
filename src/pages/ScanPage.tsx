@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { normalizeIdentifier } from '../lib/identifier';
 import { CheckCircle2, AtSign, Loader2, AlertTriangle, UserPlus } from 'lucide-react';
 
 export function ScanPage() {
@@ -65,7 +66,7 @@ export function ScanPage() {
     
     try {
       const result = await api.post(`/classes/${classId}/scan/${step}`, {
-        identifier: identifier.trim(),
+        identifier: normalizeIdentifier(identifier),
       });
       
       setDeviceScannedStatus(classId, step);
@@ -73,7 +74,7 @@ export function ScanPage() {
     } catch (err: any) {
       if (err.message === 'USER_NOT_FOUND') {
         // Redireciona para o pré-cadastro com o CPF e a URL de retorno
-        navigate(`/pre-register?identifier=${encodeURIComponent(identifier)}&returnUrl=${encodeURIComponent(window.location.pathname)}`);
+        navigate(`/pre-register?identifier=${encodeURIComponent(normalizeIdentifier(identifier))}&returnUrl=${encodeURIComponent(window.location.pathname)}`);
       } else if (err.message === 'NOT_ENROLLED') {
         setNeedsEnrollment(true);
         setEnrollmentCourseId(err.course_id || classData?.course_id);
@@ -86,13 +87,14 @@ export function ScanPage() {
   };
 
   const handleEnrollAndScan = async () => {
-    if (!enrollmentCourseId || !identifier) return;
+    const cleanIdentifier = normalizeIdentifier(identifier);
+    if (!enrollmentCourseId || !cleanIdentifier) return;
     setLoading(true);
     try {
       // 1. Inscreve no curso
-      await api.post(`/courses/${enrollmentCourseId}/enroll`, { identifier });
+      await api.post(`/courses/${enrollmentCourseId}/enroll`, { identifier: cleanIdentifier });
       // 2. Tenta registrar presença novamente
-      const result = await api.post(`/classes/${classId}/scan/${step}`, { identifier });
+      const result = await api.post(`/classes/${classId}/scan/${step}`, { identifier: cleanIdentifier });
       
       setDeviceScannedStatus(classId || '', step || '');
       setNeedsEnrollment(false);

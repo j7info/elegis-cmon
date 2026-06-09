@@ -272,15 +272,17 @@ export function CourseDetail() {
               <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
                 {studentsReport.map((s: any) => (
                   <div key={s.identifier} className="flex flex-col gap-1 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    <div className="flex justify-between items-start">
-                      <span className="font-medium text-sm text-gray-900 line-clamp-1">{s.full_name}</span>
-                      <span className={clsx("text-xs font-bold px-2 py-0.5 rounded", s.approved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
-                        {Math.round(s.percentage)}%
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      Cpf/Email: {maskIdentifier(s.identifier)}
-                    </div>
+                      <div className="flex justify-between items-start">
+                        <span className="font-medium text-sm text-gray-900 line-clamp-1">{s.full_name}</span>
+                        <span className={clsx("text-xs font-bold px-2 py-0.5 rounded", s.approved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
+                          {Math.round(s.percentage)}%
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500 flex items-center gap-2">
+                        <span>Cpf/Email: {maskIdentifier(s.identifier)}</span>
+                        <span className="text-gray-300">|</span>
+                        <span>Avaliação: <strong className="text-teal-600">{s.evaluation_score || 0}%</strong></span>
+                      </div>
                   </div>
                 ))}
               </div>

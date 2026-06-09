@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import { normalizeIdentifier } from '../lib/identifier';
 import { CheckCircle2, User, Briefcase, Building2, BookA, AtSign } from 'lucide-react';
 
 export function RegisterClass() {
@@ -46,7 +47,7 @@ export function RegisterClass() {
     
     try {
       await api.post(`/classes/${classId}/registrations`, {
-        identifier: identifier.trim(),
+        identifier: normalizeIdentifier(identifier),
         full_name: fullName.trim(),
         role: role.trim(),
         department: department.trim(),

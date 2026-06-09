@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { normalizeIdentifier } from '../lib/identifier';
 import { CheckCircle2, Clock, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -73,7 +74,7 @@ export function StudentQuiz() {
     try {
       const participant = await api.post(`/evaluations/${evaluationId}/join`, {
         name: name.trim(),
-        identifier: identifier.trim(),
+        identifier: normalizeIdentifier(identifier),
       });
       setParticipantId(participant.id);
     } catch (err: any) {

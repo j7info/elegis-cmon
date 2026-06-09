@@ -62,7 +62,7 @@ export function EvaluationSession() {
     return <div className="p-8 text-center text-gray-500">Avaliação não encontrada</div>;
   }
 
-  const { evaluation, participants, current_question, result_data, participant_answers, questions } = session;
+  const { evaluation, participants, current_question, result_data, participant_answers, questions, all_results } = session;
   const totalQuestions = questions?.length || 0;
   const answeredCount = participant_answers?.length || 0;
 
@@ -290,11 +290,46 @@ export function EvaluationSession() {
         )}
 
         {evaluation.phase === 'completed' && (
-          <div className="max-w-2xl mx-auto text-center">
-            <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100">
-              <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Avaliação Finalizada</h2>
-              <p className="text-gray-500 mb-6">{totalQuestions} pergunta(s) · {participants?.length || 0} participante(s)</p>
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="text-center">
+              <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-1">Avaliação Finalizada</h2>
+              <p className="text-gray-500">{totalQuestions} pergunta(s) · {participants?.length || 0} participante(s)</p>
+            </div>
+
+            {all_results && all_results.map((r: any, idx: number) => (
+              <div key={r.question.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-1">
+                  {idx + 1}. {r.question.text}
+                </h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  {r.total_answers} resposta(s) · {r.correct_count} acertaram
+                </p>
+                <div className="space-y-2">
+                  {r.alternatives_stats.map((alt: any) => {
+                    const isCorrect = alt.id === r.correct_alternative_id;
+                    const pct = r.total_answers > 0 ? Math.round((alt.count / r.total_answers) * 100) : 0;
+                    return (
+                      <div key={alt.id} className={clsx(
+                        "relative overflow-hidden rounded-xl border-2",
+                        isCorrect ? "border-green-500 bg-green-50" : "border-gray-200 bg-gray-50"
+                      )}>
+                        <div className={clsx("absolute inset-y-0 left-0 transition-all", isCorrect ? "bg-green-200/50" : "bg-gray-200/50")} style={{ width: `${pct}%` }} />
+                        <div className="relative px-4 py-3 flex items-center justify-between">
+                          <span className="font-medium text-gray-800 flex items-center gap-2">
+                            {alt.text}
+                            {isCorrect && <CheckCircle2 className="w-4 h-4 text-green-600" />}
+                          </span>
+                          <span className="font-bold text-sm">{alt.count} ({pct}%)</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            <div className="text-center">
               <button
                 onClick={() => navigate(-1)}
                 className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold transition-colors"

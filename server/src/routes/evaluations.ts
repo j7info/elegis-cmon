@@ -139,7 +139,7 @@ router.get('/evaluations/:id', authMiddleware, async (req: AuthRequest, res: Res
   }
 });
 
-// PUT /api/evaluations/:id — Atualizar avaliação (título, tempo)
+// PUT /api/evaluations/:id — Atualizar avaliação (título, tempo, perguntas)
 router.put('/evaluations/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const canAccess = await userCanAccessEvaluation(req.params.id, req.user!.id, req.user!.system_role);
@@ -148,23 +148,75 @@ router.put('/evaluations/:id', authMiddleware, isCourseCreatorMiddleware, async 
       return;
     }
 
-    const { title, question_time } = req.body;
-    const setClauses: string[] = ['updated_at = NOW()'];
-    const values: any[] = [];
-    let idx = 1;
+    const { title, question_time, questions } = req.body;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (title !== undefined) { setClauses.push(`title = $${idx++}`); values.push(title.trim()); }
-    if (question_time !== undefined) { setClauses.push(`question_time = $${idx++}`); values.push(question_time); }
+      // Atualiza título/tempo
+      const setClauses: string[] = ['updated_at = NOW()'];
+      const values: any[] = [];
+      let idx = 1;
 
-    values.push(req.params.id);
-    const { rows: [updated] } = await pool.query(
-      `UPDATE evaluations SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values
-    );
-    res.json(updated);
-  } catch (err) {
+      if (title !== undefined) { setClauses.push(`title = $${idx++}`); values.push(title.trim()); }
+      if (question_time !== undefined) { setClauses.push(`question_time = $${idx++}`); values.push(question_time); }
+
+      values.push(req.params.id);
+      const { rows: [updated] } = await client.query(
+        `UPDATE evaluations SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
+        values
+      );
+
+      // Se veio questions, substitui todas
+      if (questions && questions.length > 0) {
+        await client.query('DELETE FROM questions WHERE evaluation_id = $1', [req.params.id]);
+
+        for (let i = 0; i < questions.length; i++) {
+          const q = questions[i];
+          if (!q.text?.trim() || !q.alternatives?.length) {
+            throw new Error(`Questão ${i + 1} deve ter texto e alternativas`);
+          }
+
+          const { rows: [qRow] } = await client.query(
+            `INSERT INTO questions (evaluation_id, text, order_index)
+             VALUES ($1, $2, $3) RETURNING *`,
+            [req.params.id, q.text.trim(), i]
+          );
+
+          for (let j = 0; j < q.alternatives.length; j++) {
+            const a = q.alternatives[j];
+            if (!a.text?.trim()) {
+              throw new Error(`Alternativa ${j + 1} da questão ${i + 1} deve ter texto`);
+            }
+            await client.query(
+              `INSERT INTO alternatives (question_id, text, is_correct, order_index)
+               VALUES ($1, $2, $3, $4)`,
+              [qRow.id, a.text.trim(), a.is_correct || false, j]
+            );
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+
+      // Retorna avaliação completa
+      const { rows: [fullEval] } = await pool.query(
+        `SELECT e.*,
+          (SELECT COUNT(*) FROM questions WHERE evaluation_id = e.id)::int AS question_count,
+          (SELECT COUNT(*) FROM evaluation_participants WHERE evaluation_id = e.id)::int AS participant_count
+         FROM evaluations e WHERE e.id = $1`,
+        [req.params.id]
+      );
+      res.json(fullEval);
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
     console.error('Update evaluation error:', err);
-    res.status(500).json({ error: 'Erro ao atualizar avaliação' });
+    res.status(500).json({ error: err.message || 'Erro ao atualizar avaliação' });
   }
 });
 
@@ -281,6 +333,39 @@ router.post('/evaluations/:id/next-phase', authMiddleware, isCourseCreatorMiddle
   }
 });
 
+// POST /api/evaluations/:id/reset — Reexibir avaliação (limpa respostas e volta pra draft)
+router.post('/evaluations/:id/reset', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessEvaluation(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Avaliação não encontrada' });
+      return;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM student_answers WHERE evaluation_id = $1', [req.params.id]);
+      await client.query('DELETE FROM evaluation_participants WHERE evaluation_id = $1', [req.params.id]);
+      const { rows: [updated] } = await client.query(
+        `UPDATE evaluations SET status = 'draft', phase = 'idle', current_question = 0, phase_started_at = NULL, updated_at = NOW()
+         WHERE id = $1 RETURNING *`,
+        [req.params.id]
+      );
+      await client.query('COMMIT');
+      res.json(updated);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Reset evaluation error:', err);
+    res.status(500).json({ error: 'Erro ao reexibir avaliação' });
+  }
+});
+
 // POST /api/evaluations/:id/end — Finalizar avaliação
 router.post('/evaluations/:id/end', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -332,15 +417,18 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
 
     let currentQuestionWithAlts = null;
     let resultData = null;
+    let allResults: any[] | null = null;
 
-    if (evalRow.status === 'active' && evalRow.current_question < questions.length) {
+    const isActiveOrCompleted = evalRow.status === 'active' || evalRow.status === 'completed';
+
+    if (isActiveOrCompleted && evalRow.current_question < questions.length) {
       const cq = questions[evalRow.current_question];
       currentQuestionWithAlts = {
         ...cq,
         alternatives: alternatives.filter((a: any) => a.question_id === cq.id),
       };
 
-      if (evalRow.phase === 'result') {
+      if (evalRow.phase === 'result' || evalRow.status === 'completed') {
         const correctAlt = alternatives.find((a: any) => a.question_id === cq.id && a.is_correct);
         const { rows: answers } = await pool.query(
           `SELECT sa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
@@ -370,6 +458,33 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
       }
     }
 
+    // Resultados completos para avaliação finalizada
+    if (evalRow.status === 'completed') {
+      allResults = [];
+      for (const q of questions) {
+        const qAlts = alternatives.filter((a: any) => a.question_id === q.id);
+        const correctAlt = qAlts.find((a: any) => a.is_correct);
+        const { rows: answers } = await pool.query(
+          `SELECT sa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
+           FROM student_answers sa
+           JOIN evaluation_participants ep ON sa.participant_id = ep.id
+           WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
+          [req.params.id, q.id]
+        );
+
+        allResults.push({
+          question: { id: q.id, text: q.text, order_index: q.order_index },
+          alternatives_stats: qAlts.map((alt: any) => ({
+            ...alt,
+            count: answers.filter((a: any) => a.alternative_id === alt.id).length,
+          })),
+          correct_alternative_id: correctAlt?.id || null,
+          correct_count: answers.filter((a: any) => a.alternative_id === correctAlt?.id).length,
+          total_answers: answers.length,
+        });
+      }
+    }
+
     // Respostas do participante (para o professor saber quem já respondeu)
     let participantAnswers: any[] = [];
     if (evalRow.status === 'active' && evalRow.current_question < questions.length) {
@@ -393,6 +508,7 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
       current_question: currentQuestionWithAlts,
       result_data: resultData,
       participant_answers: participantAnswers,
+      all_results: allResults,
     });
   } catch (err) {
     console.error('Get session error:', err);

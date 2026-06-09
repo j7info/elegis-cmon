@@ -41,6 +41,7 @@ export function ClassDetail() {
   // Evaluation state
   const [evaluations, setEvaluations] = useState<any[]>([]);
   const [showCreateEval, setShowCreateEval] = useState(false);
+  const [editingEvalId, setEditingEvalId] = useState<number | null>(null);
   const [evalTitle, setEvalTitle] = useState('');
   const [evalQuestionTime, setEvalQuestionTime] = useState('30');
   const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
@@ -338,6 +339,37 @@ export function ClassDetail() {
     setEvalQuestions(updated);
   };
 
+  const resetEvalForm = () => {
+    setEvalTitle('');
+    setEvalQuestionTime('30');
+    setEvalQuestions([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+    setEditingEvalId(null);
+  };
+
+  const openCreateEvaluation = () => {
+    resetEvalForm();
+    setShowCreateEval(true);
+  };
+
+  const openEditEvaluation = async (evalId: number) => {
+    try {
+      const data = await api.get(`/evaluations/${evalId}`);
+      setEvalTitle(data.title);
+      setEvalQuestionTime(String(data.question_time || 30));
+      setEvalQuestions(data.questions.map((q: any) => ({
+        text: q.text,
+        alternatives: q.alternatives.map((a: any) => ({
+          text: a.text,
+          is_correct: a.is_correct || false,
+        })),
+      })));
+      setEditingEvalId(evalId);
+      setShowCreateEval(true);
+    } catch (err) {
+      alert('Erro ao carregar avaliação para edição');
+    }
+  };
+
   const handleCreateEvaluation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!evalTitle.trim() || !classId) return;
@@ -351,18 +383,24 @@ export function ClassDetail() {
     }));
 
     try {
-      await api.post(`/classes/${classId}/evaluations`, {
-        title: evalTitle.trim(),
-        question_time: parseInt(evalQuestionTime) || 30,
-        questions,
-      });
+      if (editingEvalId) {
+        await api.put(`/evaluations/${editingEvalId}`, {
+          title: evalTitle.trim(),
+          question_time: parseInt(evalQuestionTime) || 30,
+          questions,
+        });
+      } else {
+        await api.post(`/classes/${classId}/evaluations`, {
+          title: evalTitle.trim(),
+          question_time: parseInt(evalQuestionTime) || 30,
+          questions,
+        });
+      }
       setShowCreateEval(false);
-      setEvalTitle('');
-      setEvalQuestionTime('30');
-      setEvalQuestions([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+      resetEvalForm();
       loadEvaluations();
     } catch (err: any) {
-      alert(err.message || 'Erro ao criar avaliação');
+      alert(err.message || 'Erro ao salvar avaliação');
     }
   };
 
@@ -373,6 +411,16 @@ export function ClassDetail() {
       loadEvaluations();
     } catch (err: any) {
       alert(err.message || 'Erro ao excluir');
+    }
+  };
+
+  const handleResetEvaluation = async (evalId: number) => {
+    if (!window.confirm('Reexibir esta avaliação? Os dados de participantes e respostas serão apagados.')) return;
+    try {
+      await api.post(`/evaluations/${evalId}/reset`);
+      loadEvaluations();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao reexibir');
     }
   };
 
@@ -614,7 +662,7 @@ export function ClassDetail() {
           </h2>
           {classData.status !== 'completed' && (
             <button
-              onClick={() => setShowCreateEval(true)}
+              onClick={openCreateEvaluation}
               className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
             >
               <Plus className="w-4 h-4" /> Inserir Avaliação
@@ -647,46 +695,38 @@ export function ClassDetail() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {(ev.status === 'draft' || ev.status === 'completed') && (
-                    <button
-                      onClick={() => handleDeleteEvaluation(ev.id)}
-                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Excluir"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
                   {ev.status === 'draft' && (
-                    <button
-                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
-                      className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors"
-                    >
-                      Iniciar Avaliação
-                    </button>
+                    <>
+                      <button onClick={() => openEditEvaluation(ev.id)} className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors" title="Editar">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDeleteEvaluation(ev.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => navigate(`/evaluation/${ev.id}/session`)} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors">
+                        Iniciar Avaliação
+                      </button>
+                    </>
                   )}
                   {ev.status === 'waiting' && (
-                    <button
-                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
-                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold transition-colors"
-                    >
+                    <button onClick={() => navigate(`/evaluation/${ev.id}/session`)} className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold transition-colors">
                       Ir para Sala
                     </button>
                   )}
                   {ev.status === 'active' && (
-                    <button
-                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
-                    >
+                    <button onClick={() => navigate(`/evaluation/${ev.id}/session`)} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-2">
                       <Eye className="w-4 h-4" /> Acompanhar
                     </button>
                   )}
                   {ev.status === 'completed' && (
-                    <button
-                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors"
-                    >
-                      Ver Resultados
-                    </button>
+                    <>
+                      <button onClick={() => handleResetEvaluation(ev.id)} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-2">
+                        <Play className="w-4 h-4" /> Reexibir
+                      </button>
+                      <button onClick={() => navigate(`/evaluation/${ev.id}/session`)} className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm font-bold transition-colors">
+                        Ver Resultados
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -697,13 +737,13 @@ export function ClassDetail() {
 
       {/* Create Evaluation Modal */}
       {showCreateEval && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowCreateEval(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => { setShowCreateEval(false); resetEvalForm(); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center p-6 border-b border-gray-100">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <HelpCircle className="w-5 h-5 text-teal-600" /> Nova Avaliação
+                <HelpCircle className="w-5 h-5 text-teal-600" /> {editingEvalId ? 'Editar Avaliação' : 'Nova Avaliação'}
               </h2>
-              <button onClick={() => setShowCreateEval(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowCreateEval(false); resetEvalForm(); }} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -785,12 +825,12 @@ export function ClassDetail() {
               </div>
 
               <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
-                <button type="button" onClick={() => setShowCreateEval(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">
+                <button type="button" onClick={() => { setShowCreateEval(false); resetEvalForm(); }} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">
                   Cancelar
                 </button>
                 <button type="submit" disabled={!evalTitle.trim() || evalQuestions.some((q: any) => !q.text.trim() || q.alternatives.some((a: any) => !a.text.trim())) || evalQuestions.some((q: any) => !q.alternatives.some((a: any) => a.is_correct))}
                   className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors disabled:opacity-50">
-                  Criar Avaliação
+                  {editingEvalId ? 'Salvar Alterações' : 'Criar Avaliação'}
                 </button>
               </div>
             </form>

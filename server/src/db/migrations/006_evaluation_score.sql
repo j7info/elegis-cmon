@@ -1,0 +1,1 @@
+ALTER TABLE certificates ADD COLUMN IF NOT EXISTS evaluation_score INTEGER DEFAULT 0;

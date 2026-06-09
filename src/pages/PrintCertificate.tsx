@@ -41,14 +41,15 @@ export function PrintCertificate() {
         }
 
         // Issue or fetch certificate
-        const cert = await api.post('/certificates', {
-          course_id: parseInt(courseId!),
-          student_id: decodeURIComponent(studentId!),
-          student_name: student.full_name || 'Sem Nome',
-          course_title: courseData.title,
-          points: student.points,
-          percentage: student.percentage,
-        });
+const cert = await api.post('/certificates', {
+  course_id: parseInt(courseId!),
+  student_id: decodeURIComponent(studentId!),
+  student_name: student.full_name || 'Sem Nome',
+  course_title: courseData.title,
+  points: student.points,
+  percentage: student.percentage,
+  evaluation_score: student.evaluation_score || 0,
+});
 
         setStudentInfo({
           ...student,
@@ -74,12 +75,14 @@ export function PrintCertificate() {
   
   const configText = certConfig.text || 'Certificamos que {{ALUNO}} concluiu com êxito o curso de {{CURSO}} com carga horária de {{CARGA_HORARIA}}h, alcançando a marca de {{PONTUACAO}} pontos e {{PERCENTUAL}}% de presença.';
   
-  const formattedText = configText
-    .replace(/{{ALUNO}}/g, studentInfo.full_name || '(Nome Indisponível)')
-    .replace(/{{CURSO}}/g, course.title)
-    .replace(/{{CARGA_HORARIA}}/g, String(course.duration_hours || 0))
-    .replace(/{{PONTUACAO}}/g, String(studentInfo.points))
-    .replace(/{{PERCENTUAL}}/g, String(studentInfo.percentage));
+const formattedText = configText
+  .replace(/{{ALUNO}}/g, studentInfo.full_name || '(Nome Indisponível)')
+  .replace(/{{CURSO}}/g, course.title)
+  .replace(/{{CARGA_HORARIA}}/g, String(course.duration_hours || 0))
+  .replace(/{{PONTUACAO}}/g, String(studentInfo.points))
+  .replace(/{{PERCENTUAL}}/g, String(studentInfo.percentage))
+  .replace(/{{AVALIACAO}}/g, String(studentInfo.evaluation_score ?? 0))
+  .replace(/{{TOTAL}}/g, String((studentInfo.points || 0) + (studentInfo.evaluation_score || 0)));
 
   const signatures: any[] = certConfig.signatures || [];
 

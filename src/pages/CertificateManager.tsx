@@ -42,7 +42,7 @@ export function CertificateManager() {
           setConfigText(config.text || '');
           setSignatures(config.signatures || []);
         } else {
-          setConfigText('Certificamos que {{ALUNO}} concluiu com êxito o curso de {{CURSO}} com carga horária de {{CARGA_HORARIA}}h, alcançando a marca de {{PONTUACAO}} pontos e {{PERCENTUAL}}% de presença.');
+          setConfigText('Certificamos que {{ALUNO}} concluiu com êxito o curso de {{CURSO}} com carga horária de {{CARGA_HORARIA}}h, alcançando {{PERCENTUAL}}% de presença, {{PONTUACAO}} pontos de presença e {{AVALIACAO}} pontos de avaliação, totalizando {{TOTAL}} pontos.');
         }
       } catch (err) {
         console.error('Error loading data:', err);
@@ -113,7 +113,9 @@ export function CertificateManager() {
                   <code className="text-teal-600 font-bold font-mono ml-2">{"{{CURSO}}"}</code>, 
                   <code className="text-teal-600 font-bold font-mono ml-2">{"{{CARGA_HORARIA}}"}</code>, 
                   <code className="text-teal-600 font-bold font-mono ml-2">{"{{PONTUACAO}}"}</code>, 
-                  <code className="text-teal-600 font-bold font-mono ml-2">{"{{PERCENTUAL}}"}</code>
+                  <code className="text-teal-600 font-bold font-mono ml-2">{"{{PERCENTUAL}}"}</code>, 
+                  <code className="text-teal-600 font-bold font-mono ml-2">{"{{AVALIACAO}}"}</code>, 
+                  <code className="text-teal-600 font-bold font-mono ml-2">{"{{TOTAL}}"}</code>
                 </div>
                 <textarea 
                   value={configText}
@@ -217,7 +219,7 @@ export function CertificateManager() {
                         <User className="w-4 h-4 text-gray-400" /> {student.full_name}
                       </div>
                       <div className="text-xs text-gray-500 mt-1 pl-6">
-                        {Math.round(student.percentage)}% Presença • {student.points} pontos
+                        {Math.round(student.percentage)}% Presença • {student.points} pts presença • {student.evaluation_score || 0} pts avaliação • Total: {(student.points || 0) + (student.evaluation_score || 0)} pts
                       </div>
                     </div>
                     <Link 

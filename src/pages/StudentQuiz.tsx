@@ -59,13 +59,11 @@ export function StudentQuiz() {
   }, [state?.phase, state?.phase_started_at, state?.question_time]);
 
   useEffect(() => {
-    if (state?.my_answer) {
-      setSelectedAlt(state.my_answer);
-    }
     if (state?.phase === 'question') {
+      setSelectedAlt(state?.my_answer || null);
       setFeedback(null);
     }
-  }, [state?.my_answer, state?.phase]);
+  }, [state?.question?.id, state?.phase]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -60,8 +60,17 @@ router.post('/:classId/scan/:step', async (req: Request, res: Response) => {
     const user = userResult.rows[0];
 
     // 4. Verifica se está inscrito no curso
+    // Se o identifier do aluno (email) for diferente do usado no registro
+    // (CPF), cruza via app_users.
     const regResult = await pool.query(
-      'SELECT * FROM registrations WHERE course_id = $1 AND identifier = $2',
+      `SELECT * FROM registrations WHERE course_id = $1 AND (
+        identifier = $2
+        OR EXISTS (
+          SELECT 1 FROM app_users u
+          WHERE (u.cpf = $2 AND registrations.identifier = u.email)
+             OR (u.email = $2 AND registrations.identifier = u.cpf)
+        )
+      )`,
       [classData.course_id, cleanIdentifier]
     );
 

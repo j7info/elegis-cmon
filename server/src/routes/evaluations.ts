@@ -558,10 +558,19 @@ router.post('/evaluations/:id/join', async (req: Request, res: Response) => {
     }
 
     // Tenta auto-vincular com a matrícula no curso pelo CPF/email
+    // Se o identifier do aluno (email) for diferente do usado no registro
+    // (CPF), cruza via app_users para achar o vínculo.
     const { rows: registrations } = await pool.query(
       `SELECT r.full_name, r.identifier FROM registrations r
        JOIN classes cl ON r.class_id = cl.id
-       WHERE cl.id = $1 AND r.identifier = $2
+       WHERE cl.id = $1 AND (
+         r.identifier = $2
+         OR EXISTS (
+           SELECT 1 FROM app_users u
+           WHERE (u.cpf = $2 AND r.identifier = u.email)
+              OR (u.email = $2 AND r.identifier = u.cpf)
+         )
+       )
        LIMIT 1`,
       [evalRow.class_id, cleanId]
     );

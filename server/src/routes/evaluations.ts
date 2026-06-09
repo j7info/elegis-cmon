@@ -500,19 +500,21 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
     }
 
     // Pontuação total de cada aluno
-    interface ScoreRow { participant_id: number; total_score: number; total_possible: number; }
+    interface ScoreRow { participant_id: number; total_score: number; total_possible: number; justification: number | null; }
     let studentScores: ScoreRow[] = [];
     if (evalRow.status === 'completed' || evalRow.status === 'active') {
       const { rows: scores } = await pool.query(
         `SELECT
-           sa.participant_id,
-           SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END) AS total_score,
-           SUM(q.points) AS total_possible
-         FROM student_answers sa
-         JOIN alternatives a ON sa.alternative_id = a.id
-         JOIN questions q ON sa.question_id = q.id
-         WHERE sa.evaluation_id = $1
-         GROUP BY sa.participant_id`,
+           ep.id AS participant_id,
+           COALESCE(SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END), 0) AS total_score,
+           COALESCE(SUM(q.points), 0) AS total_possible,
+           ep.justification
+         FROM evaluation_participants ep
+         LEFT JOIN student_answers sa ON sa.participant_id = ep.id
+         LEFT JOIN alternatives a ON sa.alternative_id = a.id
+         LEFT JOIN questions q ON sa.question_id = q.id
+         WHERE ep.evaluation_id = $1
+         GROUP BY ep.id, ep.justification`,
         [req.params.id]
       );
       studentScores = scores;
@@ -754,6 +756,32 @@ router.get('/evaluations/:id/state', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Get state error:', err);
     res.status(500).json({ error: 'Erro ao buscar estado' });
+  }
+});
+
+// PUT /api/evaluations/:evaluationId/participants/:participantId/justify
+router.put('/evaluations/:evaluationId/participants/:participantId/justify', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { justification } = req.body;
+    if (justification == null || justification < 0 || justification > 100) {
+      res.status(400).json({ error: 'justification (0-100) é obrigatório' });
+      return;
+    }
+
+    const { rows: [participant] } = await pool.query(
+      `UPDATE evaluation_participants SET justification = $1 WHERE id = $2 RETURNING *`,
+      [justification, req.params.participantId]
+    );
+
+    if (!participant) {
+      res.status(404).json({ error: 'Participante não encontrado' });
+      return;
+    }
+
+    res.json(participant);
+  } catch (err) {
+    console.error('Justify evaluation error:', err);
+    res.status(500).json({ error: 'Erro ao justificar avaliação' });
   }
 });
 

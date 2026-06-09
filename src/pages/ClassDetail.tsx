@@ -109,6 +109,9 @@ export function ClassDetail() {
   const pEnd = classData.points_end ?? 30;
   const pTotal = pStart + pMiddle + pEnd;
   const calcPoints = (att: any) => {
+    if (att?.justification != null) {
+      return Math.round((pStart + pMiddle + pEnd) * att.justification / 100);
+    }
     let p = 0;
     if (att?.scan_start) p += pStart;
     if (att?.scan_middle) p += pMiddle;
@@ -431,6 +434,19 @@ export function ClassDetail() {
     }
   };
 
+  const [justifyingId, setJustifyingId] = useState<string | null>(null);
+
+  const handleJustifyAttendance = async (identifier: string, justification: number) => {
+    if (!classId) return;
+    try {
+      await api.put(`/classes/${classId}/attendances/justify`, { identifier, justification });
+      setJustifyingId(null);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao justificar');
+    }
+  };
+
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
   const registrationUrl = `${appUrl}/#/register/${classId}`;
 
@@ -629,11 +645,12 @@ export function ClassDetail() {
                 <th className="px-4 py-3 text-gray-700 text-center">Fim ({pEnd})</th>
                 <th className="px-4 py-3 text-gray-700 text-center font-bold">Total</th>
                 <th className="px-4 py-3 text-gray-700 text-center">Avaliação</th>
+                <th className="px-4 py-3 text-gray-700 text-center">Justificativa</th>
               </tr>
             </thead>
             <tbody>
               {registrations.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
               ) : (
                 registrations.map(reg => {
                   const att = attendances.find(a => a.identifier === reg.identifier);
@@ -663,6 +680,30 @@ export function ClassDetail() {
                           }
                           return <span className="text-gray-300">-</span>;
                         })()}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {att?.justification != null ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                            <Award className="w-3 h-3" /> {att.justification}%
+                          </span>
+                        ) : classData.status !== 'completed' && p === 0 ? (
+                          <div className="relative">
+                            <button
+                              onClick={() => setJustifyingId(justifyingId === reg.identifier ? null : reg.identifier)}
+                              className="text-xs text-teal-600 hover:text-teal-800 font-medium"
+                            >
+                              Justificar
+                            </button>
+                            {justifyingId === reg.identifier && (
+                              <div className="absolute right-0 top-6 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex gap-1">
+                                <button onClick={() => handleJustifyAttendance(reg.identifier, 70)} className="px-3 py-1.5 text-xs font-bold bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 whitespace-nowrap">70%</button>
+                                <button onClick={() => handleJustifyAttendance(reg.identifier, 100)} className="px-3 py-1.5 text-xs font-bold bg-green-100 text-green-800 rounded-md hover:bg-green-200 whitespace-nowrap">100%</button>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-300">-</span>
+                        )}
                       </td>
                     </tr>
                   )

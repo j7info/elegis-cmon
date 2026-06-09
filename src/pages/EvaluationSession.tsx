@@ -11,6 +11,7 @@ export function EvaluationSession() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [justifyingId, setJustifyingId] = useState<number | null>(null);
   const pollRef = useRef<any>(null);
 
   const loadSession = useCallback(async () => {
@@ -48,6 +49,16 @@ export function EvaluationSession() {
       await api.post(`/evaluations/${evaluationId}/${action}`);
     } catch (err) {
       console.error('Action error:', err);
+    }
+  };
+
+  const handleJustifyEvaluation = async (participantId: number, justification: number) => {
+    try {
+      await api.put(`/evaluations/${evaluationId}/participants/${participantId}/justify`, { justification });
+      setJustifyingId(null);
+      loadSession();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao justificar');
     }
   };
 
@@ -343,13 +354,16 @@ export function EvaluationSession() {
                         <th className="px-3 py-2 text-center text-gray-500 font-medium">Nota</th>
                         <th className="px-3 py-2 text-center text-gray-500 font-medium">Total possível</th>
                         <th className="px-3 py-2 text-center text-gray-500 font-medium">Aproveitamento</th>
+                        <th className="px-3 py-2 text-center text-gray-500 font-medium">Justificativa</th>
                       </tr>
                     </thead>
                     <tbody>
                       {participants.map((p: any) => {
                         const score = student_scores.find((s: any) => s.participant_id === p.id);
-                        const pts = score ? parseInt(score.total_score) : 0;
+                        const rawPts = score ? parseInt(score.total_score) : 0;
                         const maxPts = score ? parseInt(score.total_possible) : 0;
+                        const isJustified = score?.justification != null;
+                        const pts = isJustified ? Math.round((maxPts * score.justification) / 100) : rawPts;
                         const pct = maxPts > 0 ? Math.round((pts / maxPts) * 100) : 0;
                         return (
                           <tr key={p.id} className="border-b border-gray-50">
@@ -357,9 +371,31 @@ export function EvaluationSession() {
                             <td className="px-3 py-2 text-center font-bold text-teal-600">{pts}</td>
                             <td className="px-3 py-2 text-center text-gray-500">{maxPts}</td>
                             <td className="px-3 py-2 text-center">
-                              <span className={clsx("px-2 py-0.5 rounded-full text-xs font-bold", pct >= 70 ? "bg-green-100 text-green-700" : pct >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
+                              <span className={clsx("px-2 py-0.5 rounded-full text-xs font-bold", isJustified ? "bg-amber-100 text-amber-700" : pct >= 70 ? "bg-green-100 text-green-700" : pct >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
                                 {pct}%
                               </span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {isJustified ? (
+                                <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                                  {score.justification}%
+                                </span>
+                              ) : (
+                                <div className="relative inline-block">
+                                  <button
+                                    onClick={() => setJustifyingId(justifyingId === p.id ? null : p.id)}
+                                    className="text-xs text-teal-600 hover:text-teal-800 font-medium"
+                                  >
+                                    Justificar
+                                  </button>
+                                  {justifyingId === p.id && (
+                                    <div className="absolute right-0 top-6 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex gap-1 whitespace-nowrap">
+                                      <button onClick={() => handleJustifyEvaluation(p.id, 70)} className="px-3 py-1.5 text-xs font-bold bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200">70%</button>
+                                      <button onClick={() => handleJustifyEvaluation(p.id, 100)} className="px-3 py-1.5 text-xs font-bold bg-green-100 text-green-800 rounded-md hover:bg-green-200">100%</button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );

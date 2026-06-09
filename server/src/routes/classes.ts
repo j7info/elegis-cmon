@@ -356,25 +356,77 @@ router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
 
     const evalIds = evaluations.map((e: any) => e.id);
 
+    // Total de pontos possíveis por avaliação
+    const { rows: evalTotals } = await pool.query(
+      `SELECT evaluation_id, SUM(points) AS total_possible
+       FROM questions WHERE evaluation_id = ANY($1::int[])
+       GROUP BY evaluation_id`,
+      [evalIds]
+    );
+    const possibleByEval = new Map<number, number>();
+    for (const et of evalTotals) {
+      possibleByEval.set(et.evaluation_id, parseInt(et.total_possible));
+    }
+
+    // Participantes com respostas e justificativas
     const { rows } = await pool.query(
       `SELECT
          ep.identifier,
          ep.name,
-         SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END) AS total_score,
-         SUM(q.points) AS total_possible
-       FROM student_answers sa
-       JOIN evaluation_participants ep ON sa.participant_id = ep.id
-       JOIN alternatives a ON sa.alternative_id = a.id
-       JOIN questions q ON sa.question_id = q.id
-       WHERE sa.evaluation_id = ANY($1::int[])
-       GROUP BY ep.identifier, ep.name`,
+         ep.evaluation_id,
+         COALESCE(SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END), 0) AS total_score,
+         ep.justification
+       FROM evaluation_participants ep
+       LEFT JOIN student_answers sa ON sa.participant_id = ep.id
+       LEFT JOIN alternatives a ON sa.alternative_id = a.id
+       LEFT JOIN questions q ON sa.question_id = q.id
+       WHERE ep.evaluation_id = ANY($1::int[])
+       GROUP BY ep.identifier, ep.name, ep.evaluation_id, ep.justification`,
       [evalIds]
     );
 
-    res.json(rows);
+    // Aplica justificativa e agrega por identifier
+    const agg = new Map<string, { name: string; total_score: number; total_possible: number }>();
+    for (const r of rows) {
+      const key = r.identifier;
+      const maxPts = possibleByEval.get(r.evaluation_id) || 0;
+      const pts = r.justification != null
+        ? Math.round((maxPts * r.justification) / 100)
+        : parseInt(r.total_score) || 0;
+      const existing = agg.get(key) || { name: r.name, total_score: 0, total_possible: 0 };
+      existing.total_score += pts;
+      existing.total_possible += maxPts;
+      agg.set(key, existing);
+    }
+
+    res.json(Array.from(agg.entries()).map(([identifier, data]) => ({ identifier, ...data })));
   } catch (err) {
     console.error('Evaluation scores error:', err);
     res.status(500).json({ error: 'Erro ao buscar notas' });
+  }
+});
+
+// PUT /api/classes/:id/attendances/justify — Justificar ausência de aluno
+router.put('/:id/attendances/justify', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { identifier, justification } = req.body;
+    if (!identifier || justification == null || justification < 0 || justification > 100) {
+      res.status(400).json({ error: 'identifier e justification (0-100) são obrigatórios' });
+      return;
+    }
+
+    const { rows: [att] } = await pool.query(
+      `INSERT INTO attendances (class_id, identifier, justification)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (class_id, identifier) DO UPDATE SET justification = EXCLUDED.justification
+       RETURNING *`,
+      [req.params.id, identifier, justification]
+    );
+
+    res.json(att);
+  } catch (err) {
+    console.error('Justify attendance error:', err);
+    res.status(500).json({ error: 'Erro ao justificar ausência' });
   }
 });
 

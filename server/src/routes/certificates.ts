@@ -29,25 +29,43 @@ async function getEvaluationScoresByClass(classIds: number[]): Promise<Map<strin
 
   const evalIds = evaluations.map((e: any) => e.id);
 
+  // Total de pontos possíveis por avaliação
+  const { rows: evalTotals } = await pool.query(
+    `SELECT evaluation_id, SUM(points) AS total_possible
+     FROM questions WHERE evaluation_id = ANY($1::int[])
+     GROUP BY evaluation_id`,
+    [evalIds]
+  );
+  const possibleByEval = new Map<number, number>();
+  for (const et of evalTotals) {
+    possibleByEval.set(et.evaluation_id, parseInt(et.total_possible));
+  }
+
+  // Participantes com suas respostas e justificativas
   const { rows: scores } = await pool.query(
     `SELECT
        ep.identifier,
-       sa.evaluation_id,
-       SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END) AS total_score,
-       SUM(q.points) AS total_possible
-     FROM student_answers sa
-     JOIN evaluation_participants ep ON sa.participant_id = ep.id
-     JOIN alternatives a ON sa.alternative_id = a.id
-     JOIN questions q ON sa.question_id = q.id
-     WHERE sa.evaluation_id = ANY($1::int[])
-     GROUP BY ep.identifier, sa.evaluation_id`,
+       ep.evaluation_id,
+       COALESCE(SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END), 0) AS total_score,
+       ep.justification
+     FROM evaluation_participants ep
+     LEFT JOIN student_answers sa ON sa.participant_id = ep.id
+     LEFT JOIN alternatives a ON sa.alternative_id = a.id
+     LEFT JOIN questions q ON sa.question_id = q.id
+     WHERE ep.evaluation_id = ANY($1::int[])
+     GROUP BY ep.identifier, ep.evaluation_id, ep.justification`,
     [evalIds]
   );
 
   const scoreMap = new Map<string, number>();
   for (const s of scores) {
-    const pts = parseInt(s.total_score) || 0;
-    const maxPts = parseInt(s.total_possible) || 1;
+    const maxPts = possibleByEval.get(s.evaluation_id) || 1;
+    let pts: number;
+    if (s.justification != null) {
+      pts = Math.round((maxPts * s.justification) / 100);
+    } else {
+      pts = parseInt(s.total_score) || 0;
+    }
     const pct = Math.round((pts / maxPts) * 100);
     const key = `${s.identifier}`;
     const current = scoreMap.get(key) || 0;
@@ -96,9 +114,16 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
         a.full_name,
         a.department,
         a.role,
-        SUM(CASE WHEN a.scan_start  IS NOT NULL THEN c.points_start  ELSE 0 END) +
-        SUM(CASE WHEN a.scan_middle IS NOT NULL THEN c.points_middle ELSE 0 END) +
-        SUM(CASE WHEN a.scan_end    IS NOT NULL THEN c.points_end    ELSE 0 END) AS points
+        SUM(
+          CASE
+            WHEN a.justification IS NOT NULL
+              THEN ROUND((c.points_start + c.points_middle + c.points_end) * a.justification / 100.0)
+            ELSE
+              CASE WHEN a.scan_start  IS NOT NULL THEN c.points_start  ELSE 0 END +
+              CASE WHEN a.scan_middle IS NOT NULL THEN c.points_middle ELSE 0 END +
+              CASE WHEN a.scan_end    IS NOT NULL THEN c.points_end    ELSE 0 END
+          END
+        ) AS points
        FROM attendances a
        JOIN classes c ON a.class_id = c.id
        WHERE a.class_id = ANY($1)

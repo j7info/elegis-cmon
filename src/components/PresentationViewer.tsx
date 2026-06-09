@@ -28,7 +28,9 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [persistentQR, setPersistentQR] = useState<{step: string, title: string} | null>(null);
-  
+  const [qrIntroStep, setQrIntroStep] = useState<string | null>(null);
+  const introducedRef = useRef<Set<string>>(new Set());
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -161,11 +163,34 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
     slideQR = { step: 'end', title: `Registre sua Saída - ${pEnd} pts` };
   }
 
+  // Mostra QR em tela cheia antes de cada etapa
   useEffect(() => {
-    if (slideQR) {
+    if (slides.length === 0) return;
+    // Inicia com QR de entrada
+    if (qrIntroStep === null && !introducedRef.current.has('start')) {
+      introducedRef.current.add('start');
+      setQrIntroStep('start');
+    }
+  }, [slides.length, qrIntroStep]);
+
+  useEffect(() => {
+    const steps = ['middle', 'end'] as const;
+    const indices: Record<string, number> = { middle: middleSlide, end: endSlide };
+    for (const step of steps) {
+      if (currentSlide === indices[step] && !introducedRef.current.has(step)) {
+        introducedRef.current.add(step);
+        setQrIntroStep(step);
+        break;
+      }
+    }
+  }, [currentSlide, middleSlide, endSlide]);
+
+  useEffect(() => {
+    // Só ativa o QR no canto quando não estiver em tela cheia
+    if (slideQR && !qrIntroStep) {
       setPersistentQR(slideQR);
     }
-  }, [slideQR?.step]);
+  }, [slideQR?.step, qrIntroStep]);
 
   useEffect(() => {
     if (timeLeft === 0) {
@@ -174,21 +199,23 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   }, [timeLeft]);
 
   useEffect(() => {
-    if (persistentQR && classData) {
-      const step = persistentQR.step;
+    const activeStep = qrIntroStep || persistentQR?.step || null;
+    if (activeStep && classData) {
+      const step = activeStep;
       const activeAt = classData[`qr_${step}_at`];
       if (!activeAt) {
         onActivateQR(step);
       }
     }
-  }, [persistentQR, classData, onActivateQR]);
+  }, [qrIntroStep, persistentQR?.step, classData, onActivateQR]);
 
   useEffect(() => {
-    if (!persistentQR || !classData) {
+    const activeStep = qrIntroStep || persistentQR?.step || null;
+    if (!activeStep || !classData) {
       setTimeLeft(null);
       return;
     }
-    const step = persistentQR.step;
+    const step = activeStep;
     const activeAt = classData[`qr_${step}_at`];
     const durationMinutes = classData.qr_duration_minutes || 10;
 
@@ -204,7 +231,7 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [persistentQR, classData]);
+  }, [qrIntroStep, persistentQR?.step, classData]);
 
   if (loading) {
     return (
@@ -233,10 +260,37 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   }
 
   // Filter recent scans for the currently active QR step
-  const recentScans = persistentQR ? attendances
+  const dismissQrIntro = () => {
+    if (!qrIntroStep) return;
+    if (qrIntroStep === 'end') return; // End QR fica até expirar
+    const step = qrIntroStep;
+    setQrIntroStep(null);
+    // Ativa o QR no servidor se ainda não estiver ativo
+    if (classData) {
+      const activeAt = classData[`qr_${step}_at`];
+      if (!activeAt) {
+        onActivateQR(step);
+      }
+    }
+    // Garante que o slide correspondente seja mostrado
+    if (step === 'start') setCurrentSlide(0);
+    else if (step === 'middle' && middleSlide >= 0) setCurrentSlide(middleSlide);
+    else if (step === 'end') setCurrentSlide(endSlide);
+  };
+
+  const activeQrStep = qrIntroStep || persistentQR?.step || null;
+  const stepTitle = qrIntroStep === 'start'
+    ? `Registre sua Entrada - ${pStart} pts`
+    : qrIntroStep === 'middle'
+    ? `Confirme sua Presença - ${pMiddle} pts`
+    : qrIntroStep === 'end'
+    ? `Registre sua Saída - ${pEnd} pts`
+    : '';
+
+  const recentScans = activeQrStep ? attendances
     .filter(a => {
-      if (persistentQR.step === 'start') return !!a.scan_start;
-      if (persistentQR.step === 'middle') return !!a.scan_middle;
+      if (activeQrStep === 'start') return !!a.scan_start;
+      if (activeQrStep === 'middle') return !!a.scan_middle;
       return !!a.scan_end;
     })
     .sort((a, b) => {
@@ -254,98 +308,149 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
   };
 
   return (
-    <div ref={containerRef} className="fixed inset-0 z-50 bg-black flex flex-col font-sans select-none overflow-hidden group">
+    <div ref={containerRef} className="fixed inset-0 z-50 bg-gray-900 flex flex-col font-sans select-none overflow-hidden group">
       
       {/* Top Controls Overlay */}
-      <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-b from-black/60 to-transparent">
-        <div className="flex items-center gap-4 text-white">
-          {settings.logoUrl && (
-            <img src={settings.logoUrl} alt="Logo" className="h-10 max-w-[120px] object-contain drop-shadow-md bg-white rounded p-1" />
-          )}
-          <div>
-            <p className="font-medium">Modo Apresentação</p>
-            <p className="text-sm text-gray-300">Slide {currentSlide + 1} de {total}</p>
+      {!qrIntroStep && (
+        <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-b from-black/60 to-transparent">
+          <div className="flex items-center gap-4 text-white">
+            {settings.logoUrl && (
+              <img src={settings.logoUrl} alt="Logo" className="h-10 max-w-[120px] object-contain drop-shadow-md bg-white rounded p-1" />
+            )}
+            <div>
+              <p className="font-medium">Modo Apresentação</p>
+              <p className="text-sm text-gray-300">Slide {currentSlide + 1} de {total}</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={toggleFullscreen} className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-md transition-colors">
+              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+            </button>
+            <button onClick={onClose} className="bg-red-500/80 hover:bg-red-500 text-white p-2 rounded-full backdrop-blur-md transition-colors">
+              <X className="w-5 h-5" />
+            </button>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={toggleFullscreen} className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-md transition-colors">
-            {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-          </button>
-          <button onClick={onClose} className="bg-red-500/80 hover:bg-red-500 text-white p-2 rounded-full backdrop-blur-md transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
+      )}
 
-      {/* Main Slide Area */}
-      <div className="flex-1 w-full h-full relative bg-gray-50">
-        {/* Slide Image */}
-        <img 
-          src={slides[currentSlide]} 
-          alt={`Slide ${currentSlide + 1}`} 
-          className="w-full h-full object-contain shadow-lg"
-          draggable={false}
-        />
-
-        {/* QR Code Overlay via Slide trigger */}
-        {persistentQR && (
-          <div className="absolute bottom-12 right-12 bg-white/95 backdrop-blur-md p-6 rounded-2xl shadow-2xl flex flex-col items-center animate-in fade-in slide-in-from-bottom-8 duration-500 w-80">
-            <h3 className="font-bold text-gray-900 mb-4">{persistentQR.title}</h3>
-            
-            <div className="p-2 bg-white rounded-xl border border-gray-200 shadow-sm mb-4">
-              <QRCodeSVG 
-                value={`${appUrl}/#/s/${classId}/${persistentQR.step}`} 
-                size={200} 
-                level="H" 
-                includeMargin={false} 
-              />
-            </div>
-
-            <div className="mb-4 h-6">
-              {timeLeft !== null && timeLeft > 0 ? (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold animate-pulse">
-                  <Clock className="w-3.5 h-3.5" /> Expira em {formatMinSec(timeLeft)}
-                </div>
-              ) : timeLeft === 0 ? (
-                <span className="text-xs font-bold text-red-500">QR CODE EXPIRADO</span>
-              ) : null}
-            </div>
-            
-            {/* Live Names Stream Panel inside Overlay */}
-            <div className="w-full relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-100 text-green-700 px-3 py-0.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1 border border-green-200">
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> AO VIVO
+      {/* QR Fullscreen */}
+      {qrIntroStep ? (
+          <div className="flex-1 w-full h-full relative flex items-center justify-center" onClick={dismissQrIntro}>
+            <div className="flex flex-col items-center gap-6">
+              <h2 className="text-white text-3xl font-bold text-center px-4">{stepTitle}</h2>
+              <div className="bg-white p-8 rounded-3xl shadow-2xl">
+                <QRCodeSVG 
+                  value={`${appUrl}/#/s/${classId}/${qrIntroStep}`} 
+                  size={360} 
+                  level="H" 
+                  includeMargin={false} 
+                />
               </div>
-              <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 pt-5 w-full min-h-[140px] flex flex-col gap-1.5 overflow-hidden">
-                {recentScans.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center italic mt-4">Aguardando leituras...</p>
+              <div className="h-8">
+                {timeLeft !== null && timeLeft > 0 ? (
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100/90 text-amber-900 rounded-full text-sm font-bold animate-pulse">
+                    <Clock className="w-4 h-4" /> Expira em {formatMinSec(timeLeft)}
+                  </div>
+                ) : timeLeft === 0 ? (
+                  <span className="text-sm font-bold text-red-400">QR CODE EXPIRADO</span>
                 ) : (
-                  recentScans.map(s => (
-                    <div key={s.identifier} className="flex items-center gap-2 text-sm text-gray-700 bg-white shadow-sm border border-gray-100 px-3 py-1.5 rounded-md animate-in slide-in-from-top-2 fade-in duration-300">
-                      <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                      <span className="truncate font-medium flex-1 text-left">{s.full_name}</span>
-                    </div>
-                  ))
+                  <span className="text-gray-400 text-sm">{qrIntroStep !== 'end' ? 'Clique para continuar' : 'Aguardando...'}</span>
                 )}
               </div>
+              {/* Live Names no QR cheio */}
+              <div className="w-80">
+                <div className="relative">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-100 text-green-700 px-3 py-0.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1 border border-green-200 z-10">
+                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> AO VIVO
+                  </div>
+                  <div className="bg-white/10 backdrop-blur border border-white/20 rounded-lg p-3 pt-5 w-full min-h-[100px] flex flex-col gap-1.5 overflow-hidden">
+                    {recentScans.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center italic mt-2">Aguardando leituras...</p>
+                    ) : (
+                      recentScans.map(s => (
+                        <div key={s.identifier} className="flex items-center gap-2 text-sm text-gray-100 bg-white/10 border border-white/10 px-3 py-1.5 rounded-md">
+                          <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                          <span className="truncate font-medium flex-1 text-left">{s.full_name}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
+          </div>
+      ) : (
+        <>
+          {/* Main Slide Area */}
+          <div className="flex-1 w-full h-full relative bg-gray-50">
+            <img 
+              src={slides[currentSlide]} 
+              alt={`Slide ${currentSlide + 1}`} 
+              className="w-full h-full object-contain shadow-lg"
+              draggable={false}
+            />
+
+            {/* QR Code Overlay no canto */}
+            {persistentQR && (
+              <div className="absolute bottom-12 right-12 bg-white/95 backdrop-blur-md p-6 rounded-2xl shadow-2xl flex flex-col items-center animate-in fade-in slide-in-from-bottom-8 duration-500 w-80">
+                <h3 className="font-bold text-gray-900 mb-4">{persistentQR.title}</h3>
+                
+                <div className="p-2 bg-white rounded-xl border border-gray-200 shadow-sm mb-4">
+                  <QRCodeSVG 
+                    value={`${appUrl}/#/s/${classId}/${persistentQR.step}`} 
+                    size={200} 
+                    level="H" 
+                    includeMargin={false} 
+                  />
+                </div>
+
+                <div className="mb-4 h-6">
+                  {timeLeft !== null && timeLeft > 0 ? (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold animate-pulse">
+                      <Clock className="w-3.5 h-3.5" /> Expira em {formatMinSec(timeLeft)}
+                    </div>
+                  ) : timeLeft === 0 ? (
+                    <span className="text-xs font-bold text-red-500">QR CODE EXPIRADO</span>
+                  ) : null}
+                </div>
+                
+                {/* Live Names Stream Panel */}
+                <div className="w-full relative">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-100 text-green-700 px-3 py-0.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1 border border-green-200">
+                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> AO VIVO
+                  </div>
+                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 pt-5 w-full min-h-[140px] flex flex-col gap-1.5 overflow-hidden">
+                    {recentScans.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center italic mt-4">Aguardando leituras...</p>
+                    ) : (
+                      recentScans.map(s => (
+                        <div key={s.identifier} className="flex items-center gap-2 text-sm text-gray-700 bg-white shadow-sm border border-gray-100 px-3 py-1.5 rounded-md animate-in slide-in-from-top-2 fade-in duration-300">
+                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                          <span className="truncate font-medium flex-1 text-left">{s.full_name}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
 
           </div>
-        )}
 
-      </div>
+          {/* Navigation Areas (Click to progress) */}
+          <div className="absolute inset-y-0 left-0 w-1/4 cursor-w-resize z-0" onClick={() => setCurrentSlide(prev => Math.max(0, prev - 1))} />
+          <div className="absolute inset-y-0 right-0 w-1/4 cursor-e-resize z-0" onClick={() => setCurrentSlide(prev => Math.min(total - 1, prev + 1))} />
 
-      {/* Navigation Areas (Click to progress) */}
-      <div className="absolute inset-y-0 left-0 w-1/4 cursor-w-resize z-0" onClick={() => setCurrentSlide(prev => Math.max(0, prev - 1))} />
-      <div className="absolute inset-y-0 right-0 w-1/4 cursor-e-resize z-0" onClick={() => setCurrentSlide(prev => Math.min(total - 1, prev + 1))} />
-
-      {/* Bottom Progress Bar */}
-      <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
-        <div 
-          className="h-full bg-teal-500 transition-all duration-300 ease-out"
-          style={{ width: `${((currentSlide + 1) / total) * 100}%` }}
-        />
-      </div>
+          {/* Bottom Progress Bar */}
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+            <div 
+              className="h-full bg-teal-500 transition-all duration-300 ease-out"
+              style={{ width: `${((currentSlide + 1) / total) * 100}%` }}
+            />
+          </div>
+        </>
+      )}
 
     </div>
   );

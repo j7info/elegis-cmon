@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -37,6 +37,13 @@ export function ClassDetail() {
   const [pointsStartInput, setPointsStartInput] = useState('40');
   const [pointsMiddleInput, setPointsMiddleInput] = useState('30');
   const [pointsEndInput, setPointsEndInput] = useState('30');
+
+  // Evaluation state
+  const [evaluations, setEvaluations] = useState<any[]>([]);
+  const [showCreateEval, setShowCreateEval] = useState(false);
+  const [evalTitle, setEvalTitle] = useState('');
+  const [evalQuestionTime, setEvalQuestionTime] = useState('30');
+  const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<any>(null);
@@ -73,6 +80,20 @@ export function ClassDetail() {
     pollRef.current = setInterval(loadData, 5000);
     return () => clearInterval(pollRef.current);
   }, [loadData]);
+
+  const loadEvaluations = useCallback(async () => {
+    if (!classId) return;
+    try {
+      const data = await api.get(`/classes/${classId}/evaluations`);
+      setEvaluations(data);
+    } catch (err) {
+      console.error('Load evaluations error:', err);
+    }
+  }, [classId]);
+
+  useEffect(() => {
+    if (classData) loadEvaluations();
+  }, [classData, loadEvaluations]);
 
   if (!classData) return <div className="p-8 text-center text-gray-500">Carregando aula...</div>;
 
@@ -286,6 +307,73 @@ export function ClassDetail() {
     if (!win) { alert('Permita pop-ups para exportar o PDF.'); return; }
     win.document.write(html);
     win.document.close();
+  };
+
+  const handleAddQuestion = () => {
+    setEvalQuestions([...evalQuestions, { text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+  };
+
+  const handleRemoveQuestion = (idx: number) => {
+    if (evalQuestions.length <= 1) return;
+    setEvalQuestions(evalQuestions.filter((_, i) => i !== idx));
+  };
+
+  const handleQuestionChange = (idx: number, text: string) => {
+    const updated = [...evalQuestions];
+    updated[idx] = { ...updated[idx], text };
+    setEvalQuestions(updated);
+  };
+
+  const handleAltChange = (qIdx: number, aIdx: number, text: string) => {
+    const updated = [...evalQuestions];
+    updated[qIdx].alternatives[aIdx] = { ...updated[qIdx].alternatives[aIdx], text };
+    setEvalQuestions(updated);
+  };
+
+  const handleCorrectChange = (qIdx: number, aIdx: number) => {
+    const updated = [...evalQuestions];
+    updated[qIdx].alternatives = updated[qIdx].alternatives.map((a: any, i: number) => ({
+      ...a, is_correct: i === aIdx,
+    }));
+    setEvalQuestions(updated);
+  };
+
+  const handleCreateEvaluation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!evalTitle.trim() || !classId) return;
+
+    const questions = evalQuestions.map(q => ({
+      text: q.text,
+      alternatives: q.alternatives.map((a: any) => ({
+        text: a.text,
+        is_correct: a.is_correct || false,
+      })),
+    }));
+
+    try {
+      await api.post(`/classes/${classId}/evaluations`, {
+        title: evalTitle.trim(),
+        question_time: parseInt(evalQuestionTime) || 30,
+        questions,
+      });
+      setShowCreateEval(false);
+      setEvalTitle('');
+      setEvalQuestionTime('30');
+      setEvalQuestions([{ text: '', alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
+      loadEvaluations();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao criar avaliação');
+    }
+  };
+
+  const handleDeleteEvaluation = async (evalId: number) => {
+    if (!window.confirm('Excluir esta avaliação?')) return;
+    try {
+      await api.delete(`/evaluations/${evalId}`);
+      loadEvaluations();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir');
+    }
   };
 
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
@@ -517,6 +605,199 @@ export function ClassDetail() {
         </div>
       </div>
       
+      {/* Evaluation Section */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+            <HelpCircle className="w-5 h-5 text-teal-600" />
+            Avaliações
+          </h2>
+          {classData.status !== 'completed' && (
+            <button
+              onClick={() => setShowCreateEval(true)}
+              className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" /> Inserir Avaliação
+            </button>
+          )}
+        </div>
+
+        {evaluations.length === 0 ? (
+          <p className="text-center text-gray-400 py-8">Nenhuma avaliação criada ainda.</p>
+        ) : (
+          <div className="space-y-3">
+            {evaluations.map((ev: any) => (
+              <div key={ev.id} className="flex items-center justify-between bg-gray-50 px-5 py-4 rounded-xl border border-gray-100">
+                <div>
+                  <h3 className="font-semibold text-gray-900">{ev.title}</h3>
+                  <p className="text-sm text-gray-500">
+                    {ev.question_count} pergunta(s) · {ev.participant_count || 0} participante(s) · {ev.question_time}s por pergunta
+                    <span className={clsx(
+                      "ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+                      ev.status === 'draft' && "bg-gray-100 text-gray-600",
+                      ev.status === 'waiting' && "bg-amber-100 text-amber-700",
+                      ev.status === 'active' && "bg-green-100 text-green-700",
+                      ev.status === 'completed' && "bg-blue-100 text-blue-700",
+                    )}>
+                      {ev.status === 'draft' && 'Rascunho'}
+                      {ev.status === 'waiting' && 'Aguardando'}
+                      {ev.status === 'active' && 'Em andamento'}
+                      {ev.status === 'completed' && 'Finalizada'}
+                    </span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {(ev.status === 'draft' || ev.status === 'completed') && (
+                    <button
+                      onClick={() => handleDeleteEvaluation(ev.id)}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Excluir"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  {ev.status === 'draft' && (
+                    <button
+                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
+                      className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Iniciar Avaliação
+                    </button>
+                  )}
+                  {ev.status === 'waiting' && (
+                    <button
+                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Ir para Sala
+                    </button>
+                  )}
+                  {ev.status === 'active' && (
+                    <button
+                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
+                    >
+                      <Eye className="w-4 h-4" /> Acompanhar
+                    </button>
+                  )}
+                  {ev.status === 'completed' && (
+                    <button
+                      onClick={() => navigate(`/evaluation/${ev.id}/session`)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Ver Resultados
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Create Evaluation Modal */}
+      {showCreateEval && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowCreateEval(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <HelpCircle className="w-5 h-5 text-teal-600" /> Nova Avaliação
+              </h2>
+              <button onClick={() => setShowCreateEval(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateEvaluation} className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Título da Avaliação</label>
+                  <input
+                    type="text"
+                    value={evalTitle}
+                    onChange={e => setEvalTitle(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                    placeholder="Ex: Quiz Módulo 1"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tempo por Pergunta (segundos)</label>
+                  <input
+                    type="number"
+                    value={evalQuestionTime}
+                    onChange={e => setEvalQuestionTime(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                    min="5"
+                    max="300"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-gray-900">Perguntas</h3>
+                  <button type="button" onClick={handleAddQuestion} className="px-3 py-1.5 text-sm font-medium text-teal-600 hover:bg-teal-50 rounded-lg transition-colors flex items-center gap-1">
+                    <Plus className="w-4 h-4" /> Adicionar Pergunta
+                  </button>
+                </div>
+
+                {evalQuestions.map((q, qIdx) => (
+                  <div key={qIdx} className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-bold text-gray-600">Pergunta {qIdx + 1}</span>
+                      {evalQuestions.length > 1 && (
+                        <button type="button" onClick={() => handleRemoveQuestion(qIdx)} className="text-xs text-red-600 hover:text-red-800 font-medium">Remover</button>
+                      )}
+                    </div>
+                    <textarea
+                      value={q.text}
+                      onChange={e => handleQuestionChange(qIdx, e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-20 resize-none mb-3"
+                      placeholder="Digite a pergunta..."
+                      required
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      {q.alternatives.map((alt: any, aIdx: number) => (
+                        <div key={aIdx} className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCorrectChange(qIdx, aIdx)}
+                            className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${alt.is_correct ? 'border-green-500 bg-green-500' : 'border-gray-300 hover:border-teal-400'}`}
+                            title="Marcar como correta"
+                          >
+                            {alt.is_correct && <CheckCircle2 className="w-4 h-4 text-white" />}
+                          </button>
+                          <input
+                            type="text"
+                            value={alt.text}
+                            onChange={e => handleAltChange(qIdx, aIdx, e.target.value)}
+                            className={`flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-500 ${alt.is_correct ? 'border-green-400 bg-green-50' : 'border-gray-300'}`}
+                            placeholder={`Alternativa ${String.fromCharCode(65 + aIdx)}`}
+                            required
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
+                <button type="button" onClick={() => setShowCreateEval(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={!evalTitle.trim() || evalQuestions.some((q: any) => !q.text.trim() || q.alternatives.some((a: any) => !a.text.trim())) || evalQuestions.some((q: any) => !q.alternatives.some((a: any) => a.is_correct))}
+                  className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors disabled:opacity-50">
+                  Criar Avaliação
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {presentationFile && (
         <ErrorBoundary>
           <PresentationViewer 

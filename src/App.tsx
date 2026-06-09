@@ -12,6 +12,8 @@ import { ResetPassword } from './pages/ResetPassword';
 import { PrintCertificate } from './pages/PrintCertificate';
 import { AdminSettings } from './pages/AdminSettings';
 import { VerifyCertificate } from './pages/VerifyCertificate';
+import { EvaluationSession } from './pages/EvaluationSession';
+import { StudentQuiz } from './pages/StudentQuiz';
 
 import { PreRegister } from './pages/PreRegister';
 
@@ -42,6 +44,8 @@ function Main() {
         <Route path="/certificate/:courseId/:studentId" element={<PrintCertificate />} />
         <Route path="/verify" element={<VerifyCertificate />} />
         <Route path="/verify/:tokenParam" element={<VerifyCertificate />} />
+        <Route path="/evaluation/:evaluationId/session" element={<ProtectedRoute><EvaluationSession /></ProtectedRoute>} />
+        <Route path="/quiz/:evaluationId" element={<StudentQuiz />} />
       </Routes>
     </Router>
   );

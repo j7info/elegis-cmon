@@ -52,7 +52,8 @@ class ApiClient {
                             currentHash.startsWith('#/pre-register') || 
                             currentHash.startsWith('#/s/') || 
                             currentHash.startsWith('#/verify') || 
-                            currentHash.startsWith('#/reset-password');
+                            currentHash.startsWith('#/reset-password') ||
+                            currentHash.startsWith('#/quiz/');
       
       if (!isPublicRoute) {
         window.location.hash = '#/';

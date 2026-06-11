@@ -287,6 +287,100 @@ router.delete('/:id/presentation', authMiddleware, isCourseCreatorMiddleware, as
   }
 });
 
+// POST /api/classes/:id/reuse — Reutilizar aula (cópia profunda)
+router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  const { course_id, title, description, date } = req.body;
+
+  if (!course_id) {
+    res.status(400).json({ error: 'course_id é obrigatório' });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Busca aula original
+    const orig = await client.query('SELECT * FROM classes WHERE id = $1', [req.params.id]);
+    if (orig.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Aula original não encontrada' });
+      return;
+    }
+    const original = orig.rows[0];
+
+    // 2. Cria nova aula
+    const { rows: [newClass] } = await client.query(
+      `INSERT INTO classes (course_id, title, description, date, status, qr_duration_minutes, owner_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, presentation_url)
+       VALUES ($1, $2, $3, $4, 'scheduled', $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [
+        course_id,
+        title?.trim() || original.title,
+        description?.trim() || original.description || '',
+        date || null,
+        original.qr_duration_minutes || 10,
+        req.user!.id,
+        original.points_start ?? 40,
+        original.points_middle ?? 30,
+        original.points_end ?? 30,
+        original.type || 'presential',
+        original.expected_duration_minutes,
+        original.slide_minimum_seconds,
+        original.presentation_url,
+      ]
+    );
+
+    // 3. Copia avaliações
+    const { rows: origEvals } = await client.query(
+      'SELECT * FROM evaluations WHERE class_id = $1',
+      [original.id]
+    );
+
+    for (const ev of origEvals) {
+      const { rows: [newEval] } = await client.query(
+        `INSERT INTO evaluations (class_id, title, question_time, status, type)
+         VALUES ($1, $2, $3, 'draft', $4) RETURNING *`,
+        [newClass.id, ev.title, ev.question_time, ev.type || 'presential']
+      );
+
+      const { rows: origQuestions } = await client.query(
+        'SELECT * FROM questions WHERE evaluation_id = $1 ORDER BY order_index',
+        [ev.id]
+      );
+
+      for (const q of origQuestions) {
+        const { rows: [newQ] } = await client.query(
+          `INSERT INTO questions (evaluation_id, text, order_index, points)
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+          [newEval.id, q.text, q.order_index, q.points ?? 10]
+        );
+
+        const { rows: origAlts } = await client.query(
+          'SELECT * FROM alternatives WHERE question_id = $1 ORDER BY order_index',
+          [q.id]
+        );
+
+        for (const alt of origAlts) {
+          await client.query(
+            `INSERT INTO alternatives (question_id, text, is_correct, order_index)
+             VALUES ($1, $2, $3, $4)`,
+            [newQ.id, alt.text, alt.is_correct, alt.order_index]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(newClass);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Reuse class error:', err);
+    res.status(500).json({ error: 'Erro ao reutilizar aula' });
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /api/classes/:id — Excluir aula (apenas se status === 'scheduled')
 router.delete('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
   try {

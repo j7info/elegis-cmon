@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth, AuthUser } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { Link } from 'react-router-dom';
-import { Plus, BookOpen, GraduationCap, ChevronRight, X, Loader2 } from 'lucide-react';
+import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy } from 'lucide-react';
 import clsx from 'clsx';
 
 const canCreateCourse = (u: AuthUser | null) =>
@@ -19,6 +19,10 @@ export function Dashboard() {
   const [selectedTeachers, setSelectedTeachers] = useState<number[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [reuseMode, setReuseMode] = useState<'new' | 'reuse'>('new');
+  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const loadData = async () => {
     if (!user) return;
@@ -46,6 +50,10 @@ export function Dashboard() {
   const closeModal = () => {
     setIsModalOpen(false);
     setSubmitError(null);
+    setReuseMode('new');
+    setSelectedCourseId(null);
+    setStartDate('');
+    setEndDate('');
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -54,16 +62,34 @@ export function Dashboard() {
     setSubmitError(null);
     try {
       setIsCreating(true);
-      await api.post('/courses', {
-        title: newTitle.trim(),
-        description: newDescription.trim(),
-        duration_hours: parseInt(durationHours) || 0,
-        additional_teachers: selectedTeachers,
-      });
+
+      if (reuseMode === 'reuse' && selectedCourseId) {
+        await api.post(`/courses/${selectedCourseId}/reuse`, {
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+          duration_hours: parseInt(durationHours) || 0,
+          start_date: startDate || null,
+          end_date: endDate || null,
+        });
+      } else {
+        await api.post('/courses', {
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+          duration_hours: parseInt(durationHours) || 0,
+          additional_teachers: selectedTeachers,
+          start_date: startDate || null,
+          end_date: endDate || null,
+        });
+      }
+
       setNewTitle('');
       setNewDescription('');
       setDurationHours('');
       setSelectedTeachers([]);
+      setStartDate('');
+      setEndDate('');
+      setReuseMode('new');
+      setSelectedCourseId(null);
       setIsModalOpen(false);
       await loadData();
     } catch (err: any) {
@@ -71,6 +97,13 @@ export function Dashboard() {
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const selectReuseCourse = (c: any) => {
+    setSelectedCourseId(c.id);
+    setNewTitle(`${c.title} (nova turma)`);
+    setNewDescription(c.description || '');
+    setDurationHours(String(c.duration_hours || 0));
   };
 
   useEffect(() => {
@@ -125,24 +158,36 @@ export function Dashboard() {
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {courses.map(c => (
-              <Link key={c.id} to={`/course/${c.id}`} className="block group">
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all h-full flex flex-col">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="p-2 bg-teal-50 text-teal-600 rounded-lg">
-                      <GraduationCap className="w-5 h-5" />
+            {courses.map(c => {
+              const status = !c.start_date ? null : new Date(c.end_date) < new Date() ? 'completed' : new Date(c.start_date) > new Date() ? 'upcoming' : 'active';
+              return (
+                <Link key={c.id} to={`/course/${c.id}`} className="block group">
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all h-full flex flex-col">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="p-2 bg-teal-50 text-teal-600 rounded-lg">
+                        <GraduationCap className="w-5 h-5" />
+                      </div>
+                      {status && (
+                        <span className={clsx("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase", {
+                          "bg-green-100 text-green-700": status === 'active',
+                          "bg-amber-100 text-amber-700": status === 'upcoming',
+                          "bg-gray-100 text-gray-500": status === 'completed',
+                        })}>
+                          {status === 'active' ? 'Em andamento' : status === 'upcoming' ? 'Previsto' : 'Concluído'}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-1 truncate group-hover:text-teal-600 transition-colors">{c.title}</h3>
+                    {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
+                    {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
+                    <div className="mt-auto pt-4 flex items-center justify-between text-teal-600 text-sm font-medium border-t border-gray-50">
+                      Acessar Curso
+                      <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                     </div>
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-900 mb-1 truncate group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                  {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
-
-                  <div className="mt-auto pt-4 flex items-center justify-between text-teal-600 text-sm font-medium border-t border-gray-50">
-                    Acessar Curso
-                    <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>
@@ -153,11 +198,13 @@ export function Dashboard() {
           onClick={closeModal}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-900">Novo Curso</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {reuseMode === 'reuse' ? 'Reaproveitar Curso' : 'Novo Curso'}
+              </h2>
               <button
                 type="button"
                 onClick={closeModal}
@@ -175,6 +222,54 @@ export function Dashboard() {
                 </div>
               )}
 
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setReuseMode('new'); setSelectedCourseId(null); }}
+                  className={clsx(
+                    'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                    reuseMode === 'new'
+                      ? 'border-teal-500 bg-teal-50 text-teal-700'
+                      : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                  )}
+                >
+                  Criar do zero
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReuseMode('reuse')}
+                  className={clsx(
+                    'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                    reuseMode === 'reuse'
+                      ? 'border-teal-500 bg-teal-50 text-teal-700'
+                      : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                  )}
+                >
+                  Reaproveitar existente
+                </button>
+              </div>
+
+              {reuseMode === 'reuse' && !selectedCourseId && (
+                <div className="max-h-48 overflow-y-auto space-y-2 border border-gray-200 rounded-lg p-2">
+                  <p className="text-xs text-gray-500 px-2 pt-1">Selecione um curso para reaproveitar:</p>
+                  {courses.length > 0 ? (
+                    courses.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => selectReuseCourse(c)}
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-teal-50 hover:text-teal-700 transition-colors text-sm border border-gray-100"
+                      >
+                        <span className="font-medium">{c.title}</span>
+                        {c.description && <span className="text-gray-500 ml-2 truncate">{c.description}</span>}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-xs text-gray-400 px-2 py-3 text-center">Nenhum curso disponível para reaproveitar.</p>
+                  )}
+                </div>
+              )}
+
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700">Título</label>
                 <input
@@ -185,6 +280,27 @@ export function Dashboard() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
                   required
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Data de Início</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Data de Término</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={e => setEndDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+                  />
+                </div>
               </div>
 
               <div className="flex flex-col gap-1">
@@ -198,23 +314,25 @@ export function Dashboard() {
                 />
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Professores Adicionais (opcional)</label>
-                <select
-                  multiple
-                  value={selectedTeachers.map(String)}
-                  onChange={e => {
-                    const values = Array.from(e.target.selectedOptions, option => parseInt(option.value));
-                    setSelectedTeachers(values);
-                  }}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-24"
-                >
-                  {allUsers.filter(u => u.id !== user.id).map(u => (
-                    <option key={u.id} value={u.id}>{u.name} {u.cargo ? `(${u.cargo})` : ''}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500">Pressione Ctrl (ou Cmd no Mac) para selecionar mais de um.</p>
-              </div>
+              {reuseMode === 'new' && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Professores Adicionais (opcional)</label>
+                  <select
+                    multiple
+                    value={selectedTeachers.map(String)}
+                    onChange={e => {
+                      const values = Array.from(e.target.selectedOptions, option => parseInt(option.value));
+                      setSelectedTeachers(values);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-24"
+                  >
+                    {allUsers.filter(u => u.id !== user.id).map(u => (
+                      <option key={u.id} value={u.id}>{u.name} {u.cargo ? `(${u.cargo})` : ''}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500">Pressione Ctrl (ou Cmd no Mac) para selecionar mais de um.</p>
+                </div>
+              )}
 
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700">Descrição</label>
@@ -237,7 +355,7 @@ export function Dashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isCreating || !newTitle.trim()}
+                  disabled={isCreating || !newTitle.trim() || (reuseMode === 'reuse' && !selectedCourseId)}
                   className="px-5 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex justify-center items-center gap-2"
                 >
                   {isCreating ? (
@@ -247,8 +365,8 @@ export function Dashboard() {
                     </>
                   ) : (
                     <>
-                      <Plus className="w-4 h-4" />
-                      Criar Curso
+                      <Copy className="w-4 h-4" />
+                      {reuseMode === 'reuse' ? 'Reaproveitar Curso' : 'Criar Curso'}
                     </>
                   )}
                 </button>

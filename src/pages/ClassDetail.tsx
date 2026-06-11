@@ -593,6 +593,22 @@ export function ClassDetail() {
           <button onClick={exportPDF} disabled={registrations.length === 0} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 disabled:opacity-50 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
             <FileText className="w-4 h-4" /> Exportar PDF
           </button>
+          <button onClick={async () => {
+            const destCourseId = prompt('ID do curso de destino (deixe vazio para o mesmo curso):');
+            if (destCourseId !== null) {
+              try {
+                const newClass = await api.post(`/classes/${classId}/reuse`, {
+                  course_id: parseInt(destCourseId) || classData.course_id,
+                  title: `${classData.title} (cópia)`,
+                });
+                navigate(`/class/${newClass.id}`);
+              } catch (err: any) {
+                alert(err?.message || 'Erro ao reutilizar aula');
+              }
+            }
+          }} className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+            <Copy className="w-4 h-4" /> Reutilizar Aula
+          </button>
         </div>
       </div>
 

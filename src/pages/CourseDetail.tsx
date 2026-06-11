@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Plus, Calendar, ChevronRight, BarChart, Award, FileUp, FileText } from 'lucide-react';
+import { ArrowLeft, Plus, Calendar, ChevronRight, BarChart, Award, FileUp, FileText, Copy, Edit3, X, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
   const { courseId } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [courseData, setCourseData] = useState<any>(null);
   const [classes, setClasses] = useState<any[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -27,6 +28,18 @@ export function CourseDetail() {
   const [newClassType, setNewClassType] = useState<'presential' | 'online'>('presential');
   const [newExpectedDuration, setNewExpectedDuration] = useState('30');
   const [newSlideMinSeconds, setNewSlideMinSeconds] = useState('30');
+  const [showEditCourse, setShowEditCourse] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDuration, setEditDuration] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [isEditingCourse, setIsEditingCourse] = useState(false);
+  const [showReuseModal, setShowReuseModal] = useState(false);
+  const [reuseTitle, setReuseTitle] = useState('');
+  const [reuseStartDate, setReuseStartDate] = useState('');
+  const [reuseEndDate, setReuseEndDate] = useState('');
+  const [isReusing, setIsReusing] = useState(false);
 
   const loadData = async () => {
     if (!courseId) return;
@@ -106,19 +119,54 @@ export function CourseDetail() {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{courseData.title}</h1>
-          <div className="flex items-center gap-4 mt-2">
+          <div className="flex items-center gap-4 mt-2 flex-wrap">
             <span className="text-sm font-medium text-teal-600 bg-teal-50 px-2 py-1 rounded">
               Carga horária: {courseData.duration_hours || 0}h
             </span>
+            {courseData.start_date && (
+              <span className="text-sm text-gray-500">
+                <Calendar className="w-3.5 h-3.5 inline mr-1" />
+                {format(new Date(courseData.start_date), 'dd/MM/yyyy')} — {courseData.end_date ? format(new Date(courseData.end_date), 'dd/MM/yyyy') : '...'}
+              </span>
+            )}
+            {courseData.parent_course_id && (
+              <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Reaproveitado</span>
+            )}
           </div>
           {courseData.description && <p className="text-gray-500 mt-3">{courseData.description}</p>}
         </div>
-        <Link 
-          to={`/course/${courseId}/certificates`}
-          className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap"
-        >
-          <Award className="w-4 h-4" /> Gerenciar Certificados
-        </Link>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => {
+              setEditTitle(courseData.title);
+              setEditDescription(courseData.description || '');
+              setEditDuration(String(courseData.duration_hours || 0));
+              setEditStartDate(courseData.start_date ? format(new Date(courseData.start_date), 'yyyy-MM-dd') : '');
+              setEditEndDate(courseData.end_date ? format(new Date(courseData.end_date), 'yyyy-MM-dd') : '');
+              setShowEditCourse(true);
+            }}
+            className="px-4 py-2 bg-gray-50 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors border border-gray-200 flex items-center gap-2 whitespace-nowrap text-sm"
+          >
+            <Edit3 className="w-4 h-4" /> Editar Curso
+          </button>
+          <button
+            onClick={() => {
+              setReuseTitle(`${courseData.title} (nova turma)`);
+              setReuseStartDate('');
+              setReuseEndDate('');
+              setShowReuseModal(true);
+            }}
+            className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+          >
+            <Copy className="w-4 h-4" /> Reutilizar Curso
+          </button>
+          <Link 
+            to={`/course/${courseId}/certificates`}
+            className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+          >
+            <Award className="w-4 h-4" /> Certificados
+          </Link>
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-8">
@@ -297,16 +345,34 @@ export function CourseDetail() {
             ) : (
               <div className="grid gap-3">
                 {classes.map(c => (
-                  <Link key={c.id} to={`/class/${c.id}`} className="block group">
-                    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                          <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
-                          {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
-                        </div>
+                  <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex items-center justify-between group">
+                    <Link to={`/class/${c.id}`} className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
+                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                        <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                        {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
                       </div>
-                      <div className="flex items-center gap-4">
+                    </Link>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={async () => {
+                          const newTitle = `${c.title} (cópia)`;
+                          try {
+                            const newClass = await api.post(`/classes/${c.id}/reuse`, {
+                              course_id: parseInt(courseId!),
+                              title: newTitle,
+                            });
+                            loadData();
+                          } catch (err: any) {
+                            alert(err?.message || 'Erro ao reutilizar aula');
+                          }
+                        }}
+                        className="text-xs text-teal-600 hover:text-teal-800 hover:bg-teal-50 px-2 py-1 rounded transition-colors font-medium"
+                        title="Reutilizar aula"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                      <Link to={`/class/${c.id}`}>
                         <span className={clsx("text-xs font-medium px-2 py-1 rounded-full", {
                           "bg-yellow-100 text-yellow-800": c.status === 'scheduled',
                           "bg-green-100 text-green-800": c.status === 'active',
@@ -314,10 +380,9 @@ export function CourseDetail() {
                         })}>
                           {c.status === 'scheduled' ? 'Agendado' : c.status === 'active' ? 'Em andamento' : 'Concluído'}
                         </span>
-                        <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
-                      </div>
+                      </Link>
                     </div>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}
@@ -363,6 +428,129 @@ export function CourseDetail() {
         </div>
 
       </div>
+
+      {showEditCourse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowEditCourse(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Editar Curso</h2>
+              <button type="button" onClick={() => setShowEditCourse(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!editTitle.trim()) return;
+              setIsEditingCourse(true);
+              try {
+                const updated = await api.put(`/courses/${courseId}`, {
+                  title: editTitle.trim(),
+                  description: editDescription.trim(),
+                  duration_hours: parseInt(editDuration) || 0,
+                  start_date: editStartDate || null,
+                  end_date: editEndDate || null,
+                });
+                setCourseData(updated);
+                setShowEditCourse(false);
+              } catch (err: any) {
+                alert(err?.message || 'Erro ao atualizar curso');
+              } finally {
+                setIsEditingCourse(false);
+              }
+            }} className="space-y-4 px-6 py-5">
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Título</label>
+                <input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" required />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Data de Início</label>
+                  <input type="date" value={editStartDate} onChange={e => setEditStartDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Data de Término</label>
+                  <input type="date" value={editEndDate} onChange={e => setEditEndDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Carga Horária (h)</label>
+                <input type="number" value={editDuration} onChange={e => setEditDuration(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Descrição</label>
+                <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none resize-none" />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowEditCourse(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium">Cancelar</button>
+                <button type="submit" disabled={isEditingCourse || !editTitle.trim()}
+                  className="px-5 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center gap-2">
+                  {isEditingCourse ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showReuseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowReuseModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Reutilizar Curso</h2>
+              <button type="button" onClick={() => setShowReuseModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!reuseTitle.trim() || !courseId) return;
+              setIsReusing(true);
+              try {
+                const newCourse = await api.post(`/courses/${courseId}/reuse`, {
+                  title: reuseTitle.trim(),
+                  start_date: reuseStartDate || null,
+                  end_date: reuseEndDate || null,
+                });
+                setShowReuseModal(false);
+                navigate(`/course/${newCourse.id}`);
+              } catch (err: any) {
+                alert(err?.message || 'Erro ao reutilizar curso');
+              } finally {
+                setIsReusing(false);
+              }
+            }} className="space-y-4 px-6 py-5">
+              <p className="text-sm text-gray-500">Será criada uma cópia deste curso com todas as aulas, avaliações e questões. Os dados de presença e notas dos alunos <strong>não</strong> serão copiados.</p>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Título da nova turma</label>
+                <input type="text" value={reuseTitle} onChange={e => setReuseTitle(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" required />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Data de Início</label>
+                  <input type="date" value={reuseStartDate} onChange={e => setReuseStartDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Data de Término</label>
+                  <input type="date" value={reuseEndDate} onChange={e => setReuseEndDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowReuseModal(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium">Cancelar</button>
+                <button type="submit" disabled={isReusing || !reuseTitle.trim()}
+                  className="px-5 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center gap-2">
+                  {isReusing ? <><Loader2 className="w-4 h-4 animate-spin" /> Copiando...</> : <><Copy className="w-4 h-4" /> Reutilizar</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

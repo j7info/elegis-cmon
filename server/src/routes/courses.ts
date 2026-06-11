@@ -56,7 +56,7 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
 
 // POST /api/courses — Criar curso
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, duration_hours, additional_teachers } = req.body;
+  const { title, description, duration_hours, additional_teachers, start_date, end_date } = req.body;
 
   if (!title?.trim()) {
     res.status(400).json({ error: 'Título é obrigatório' });
@@ -67,9 +67,9 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
   try {
     await client.query('BEGIN');
     const { rows } = await client.query(
-      `INSERT INTO courses (title, description, duration_hours, owner_id)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [title.trim(), description?.trim() || '', duration_hours || 0, req.user!.id]
+      `INSERT INTO courses (title, description, duration_hours, owner_id, start_date, end_date)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [title.trim(), description?.trim() || '', duration_hours || 0, req.user!.id, start_date || null, end_date || null]
     );
     const newCourse = rows[0];
 
@@ -201,7 +201,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
 
 // PUT /api/courses/:id — Atualizar curso
 router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, duration_hours, certificate_config, additional_teachers } = req.body;
+  const { title, description, duration_hours, certificate_config, additional_teachers, start_date, end_date } = req.body;
 
   const client = await pool.connect();
   try {
@@ -212,9 +212,11 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
         description = COALESCE($2, description),
         duration_hours = COALESCE($3, duration_hours),
         certificate_config = COALESCE($4, certificate_config),
+        start_date = COALESCE($5, start_date),
+        end_date = COALESCE($6, end_date),
         updated_at = NOW()
-       WHERE id = $5 AND ($6 = TRUE OR owner_id = $7) RETURNING *`,
-      [title, description, duration_hours, certificate_config ? JSON.stringify(certificate_config) : null, req.params.id, isAdmin(req.user), req.user!.id]
+       WHERE id = $7 AND ($8 = TRUE OR owner_id = $9) RETURNING *`,
+      [title, description, duration_hours, certificate_config ? JSON.stringify(certificate_config) : null, start_date, end_date, req.params.id, isAdmin(req.user), req.user!.id]
     );
 
     if (rows.length === 0) {
@@ -241,6 +243,127 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
     await client.query('ROLLBACK');
     console.error('Update course error:', err);
     res.status(500).json({ error: 'Erro ao atualizar curso' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/courses/:id/reuse — Reutilizar curso (cópia profunda)
+router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  const { title, description, start_date, end_date, duration_hours } = req.body;
+
+  if (!title?.trim()) {
+    res.status(400).json({ error: 'Título é obrigatório' });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Busca curso original
+    const orig = await client.query('SELECT * FROM courses WHERE id = $1', [req.params.id]);
+    if (orig.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Curso original não encontrado' });
+      return;
+    }
+    const original = orig.rows[0];
+
+    // 2. Cria novo curso
+    const { rows: [newCourse] } = await client.query(
+      `INSERT INTO courses (title, description, duration_hours, owner_id, certificate_config, start_date, end_date, parent_course_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [
+        title.trim(),
+        description?.trim() || original.description || '',
+        duration_hours || original.duration_hours || 0,
+        req.user!.id,
+        original.certificate_config,
+        start_date || null,
+        end_date || null,
+        original.id,
+      ]
+    );
+
+    // 3. Copia professores adicionais
+    const { rows: origTeachers } = await client.query(
+      'SELECT teacher_id FROM course_teachers WHERE course_id = $1',
+      [original.id]
+    );
+    for (const t of origTeachers) {
+      await client.query(
+        'INSERT INTO course_teachers (course_id, teacher_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [newCourse.id, t.teacher_id]
+      );
+    }
+
+    // 4. Copia aulas
+    const { rows: origClasses } = await client.query(
+      'SELECT * FROM classes WHERE course_id = $1 ORDER BY created_at',
+      [original.id]
+    );
+
+    for (const c of origClasses) {
+      const { rows: [newClass] } = await client.query(
+        `INSERT INTO classes (course_id, title, description, status, qr_duration_minutes, owner_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, presentation_url)
+         VALUES ($1, $2, $3, 'scheduled', $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        [
+          newCourse.id, c.title, c.description, c.qr_duration_minutes || 10,
+          req.user!.id, c.points_start ?? 40, c.points_middle ?? 30, c.points_end ?? 30,
+          c.type || 'presential', c.expected_duration_minutes, c.slide_minimum_seconds,
+          c.presentation_url,
+        ]
+      );
+
+      // 5. Copia avaliações da aula
+      const { rows: origEvals } = await client.query(
+        'SELECT * FROM evaluations WHERE class_id = $1',
+        [c.id]
+      );
+
+      for (const ev of origEvals) {
+        const { rows: [newEval] } = await client.query(
+          `INSERT INTO evaluations (class_id, title, question_time, status, type)
+           VALUES ($1, $2, $3, 'draft', $4) RETURNING *`,
+          [newClass.id, ev.title, ev.question_time, ev.type || 'presential']
+        );
+
+        // 6. Copia questões e alternativas
+        const { rows: origQuestions } = await client.query(
+          'SELECT * FROM questions WHERE evaluation_id = $1 ORDER BY order_index',
+          [ev.id]
+        );
+
+        for (const q of origQuestions) {
+          const { rows: [newQ] } = await client.query(
+            `INSERT INTO questions (evaluation_id, text, order_index, points)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [newEval.id, q.text, q.order_index, q.points ?? 10]
+          );
+
+          const { rows: origAlts } = await client.query(
+            'SELECT * FROM alternatives WHERE question_id = $1 ORDER BY order_index',
+            [q.id]
+          );
+
+          for (const alt of origAlts) {
+            await client.query(
+              `INSERT INTO alternatives (question_id, text, is_correct, order_index)
+               VALUES ($1, $2, $3, $4)`,
+              [newQ.id, alt.text, alt.is_correct, alt.order_index]
+            );
+          }
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(newCourse);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Reuse course error:', err);
+    res.status(500).json({ error: 'Erro ao reutilizar curso' });
   } finally {
     client.release();
   }

@@ -50,6 +50,7 @@ export function OnlineClassView() {
   const [elapsed, setElapsed] = useState(0);
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
+  const [pdfDoc, setPdfDoc] = useState<any>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const minRequired = classData?.slide_minimum_seconds ?? 30;
@@ -59,24 +60,19 @@ export function OnlineClassView() {
   useEffect(() => {
     if (step !== 'viewing' || progress?.completed_at) return;
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - slideStartedAt) / 1000));
+      setElapsed((Date.now() - slideStartedAt) / 1000);
     }, 1000);
     return () => clearInterval(interval);
   }, [step, slideStartedAt, progress?.completed_at]);
 
   // Render PDF slide
   const renderSlide = useCallback(async (pageNum: number) => {
-    if (!classData?.presentation_url || !canvasRef.current) return;
+    if (!pdfDoc || !canvasRef.current) return;
 
     try {
-      const apiBase = import.meta.env.VITE_API_URL || '/api';
-      const fileUrl = String(classData.presentation_url).replace(/^\/api/, apiBase);
-      const pdf = await pdfjsLib.getDocument({ url: fileUrl }).promise;
-      setTotalSlides(pdf.numPages);
+      if (pageNum >= pdfDoc.numPages) return;
 
-      if (pageNum >= pdf.numPages) return;
-
-      const page = await pdf.getPage(pageNum + 1);
+      const page = await pdfDoc.getPage(pageNum + 1);
       const viewport = page.getViewport({ scale: 1.5 });
       const canvas = canvasRef.current;
       canvas.width = viewport.width;
@@ -88,7 +84,7 @@ export function OnlineClassView() {
     } catch (err) {
       console.error('Render slide error:', err);
     }
-  }, [classData?.presentation_url]);
+  }, [pdfDoc]);
 
   useEffect(() => {
     if (step === 'viewing') {
@@ -151,6 +147,7 @@ export function OnlineClassView() {
           const apiBase = import.meta.env.VITE_API_URL || '/api';
           const fileUrl = String(classData.presentation_url).replace(/^\/api/, apiBase);
           const pdf = await pdfjsLib.getDocument({ url: fileUrl }).promise;
+          setPdfDoc(pdf);
           setTotalSlides(pdf.numPages);
           setStep('viewing');
           startSlideTimer();

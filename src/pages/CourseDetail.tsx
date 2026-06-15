@@ -378,13 +378,32 @@ export function CourseDetail() {
               <div className="grid gap-3">
                 {classes.map(c => (
                   <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex items-center justify-between group">
-                    <Link to={`/class/${c.id}`} className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                        <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
-                        {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
-                      </div>
-                    </Link>
+                    {isStudent ? (
+                      c.type === 'online' ? (
+                        <Link to={`/online-class/${c.id}`} className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                            <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>
+                          </div>
+                        </Link>
+                      ) : (
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-gray-900">{c.title}</h3>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                            <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                          </div>
+                        </div>
+                      )
+                    ) : (
+                      <Link to={`/class/${c.id}`} className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
+                        <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                          <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                          {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
+                        </div>
+                      </Link>
+                    )}
                     <div className="flex items-center gap-2">
                       {isStudent ? (
                         <>

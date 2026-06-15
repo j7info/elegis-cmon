@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { normalizeIdentifier } from '../lib/identifier';
 import * as pdfjsLib from 'pdfjs-dist';
 import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award } from 'lucide-react';
-import clsx from 'clsx';
+import clsx from 'clsx';import { useAuth } from '../lib/AuthContext';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -19,11 +19,12 @@ function formatTime(seconds: number): string {
 
 export function OnlineClassView() {
   const { classId } = useParams();
+  const { user } = useAuth();
   const [step, setStep] = useState<'join' | 'loading' | 'viewing' | 'completed' | 'evaluation'>('join');
 
   // Join form
-  const [identifier, setIdentifier] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [identifier, setIdentifier] = useState(user?.cpf || user?.email || '');
+  const [fullName, setFullName] = useState(user?.name || '');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinLoading, setJoinLoading] = useState(false);
 

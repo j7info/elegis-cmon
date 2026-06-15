@@ -150,7 +150,7 @@ export function OnlineClassView() {
         try {
           const apiBase = import.meta.env.VITE_API_URL || '/api';
           const fileUrl = String(classData.presentation_url).replace(/^\/api/, apiBase);
-          const pdf = await pdfjsLib.getDocument(fileUrl).promise;
+          const pdf = await pdfjsLib.getDocument({ url: fileUrl }).promise;
           setTotalSlides(pdf.numPages);
           setStep('viewing');
           startSlideTimer();

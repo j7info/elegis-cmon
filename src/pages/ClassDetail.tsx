@@ -52,6 +52,7 @@ export function ClassDetail() {
   const [evalQuestionTime, setEvalQuestionTime] = useState('30');
   const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', points: 10, alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
   const [justifyingId, setJustifyingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<any>(null);
@@ -69,6 +70,7 @@ export function ClassDetail() {
       setClassData(cls);
       setAttendances(atts);
       setRegistrations(studs);
+      setLoadError(null);
       try {
         const scores = await api.get(`/classes/${classId}/evaluation-scores`);
         setEvalScores(scores);
@@ -81,17 +83,24 @@ export function ClassDetail() {
         setPointsMiddleInput(String(cls.points_middle ?? 30));
         setPointsEndInput(String(cls.points_end ?? 30));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading class:', err);
+      if (err?.response?.status === 404) {
+        setLoadError('Aula não encontrada ou você não tem permissão para acessá-la.');
+      } else {
+        setLoadError('Ocorreu um erro ao carregar a aula.');
+      }
     }
   }, [classId, editingDuration, editingPoints]);
 
   useEffect(() => {
-    loadData();
-    // Poll every 5 seconds when class is active
-    pollRef.current = setInterval(loadData, 5000);
-    return () => clearInterval(pollRef.current);
-  }, [loadData]);
+    if (!loadError) {
+      loadData();
+      // Poll every 5 seconds when class is active
+      pollRef.current = setInterval(loadData, 5000);
+      return () => clearInterval(pollRef.current);
+    }
+  }, [loadData, loadError]);
 
   const loadEvaluations = useCallback(async () => {
     if (!classId) return;
@@ -106,6 +115,19 @@ export function ClassDetail() {
   useEffect(() => {
     if (classData) loadEvaluations();
   }, [classData, loadEvaluations]);
+
+  if (loadError) {
+    return (
+      <div className="p-8 max-w-md mx-auto text-center space-y-4">
+        <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 mb-4">
+          {loadError}
+        </div>
+        <Link to="/" className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-medium">
+          <ArrowLeft className="w-4 h-4" /> Voltar ao Início
+        </Link>
+      </div>
+    );
+  }
 
   if (!classData) return <div className="p-8 text-center text-gray-500">Carregando aula...</div>;
 

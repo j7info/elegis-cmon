@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Plus, Calendar, ChevronRight, BarChart, Award, FileUp, FileText, Copy, Edit3, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Link as LinkIcon, Plus, FileUp } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
@@ -24,6 +24,7 @@ export function CourseDetail() {
   const [pointsMiddle, setPointsMiddle] = useState('30');
   const [pointsEnd, setPointsEnd] = useState('30');
   const [studentsReport, setStudentsReport] = useState<any[]>([]);
+  const [pendingRegistrations, setPendingRegistrations] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [newClassType, setNewClassType] = useState<'presential' | 'online'>('presential');
   const [newExpectedDuration, setNewExpectedDuration] = useState('30');
@@ -41,19 +42,37 @@ export function CourseDetail() {
   const [reuseEndDate, setReuseEndDate] = useState('');
   const [isReusing, setIsReusing] = useState(false);
 
+  const isStudent = user?.system_role === 'ALUNO';
+
   const loadData = async () => {
     if (!courseId) return;
     try {
-      const [course, classList, report, usersData] = await Promise.all([
+      const promises: Promise<any>[] = [
         api.get(`/courses/${courseId}`),
-        api.get(`/classes/course/${courseId}`),
-        api.get(`/certificates/report/${courseId}`),
-        api.get('/users')
-      ]);
-      setCourseData(course);
-      setClasses(classList);
-      setStudentsReport(report.students || []);
-      setAllUsers(usersData);
+        api.get(`/classes/course/${courseId}`)
+      ];
+
+      if (!isStudent) {
+        promises.push(api.get(`/certificates/report/${courseId}`));
+        promises.push(api.get('/users'));
+      }
+
+      const results = await Promise.all(promises);
+      setCourseData(results[0]);
+      setClasses(results[1]);
+      
+      if (!isStudent) {
+        setStudentsReport(results[2]?.students || []);
+        setAllUsers(results[3] || []);
+        
+        // Carrega pendentes separadamente para não quebrar a tela caso a tabela não tenha a coluna status ainda
+        try {
+          const pending = await api.get(`/courses/${courseId}/pending-registrations`);
+          setPendingRegistrations(pending || []);
+        } catch (e) {
+          console.warn('Could not load pending registrations', e);
+        }
+      }
     } catch (err) {
       console.error('Error loading course:', err);
     }
@@ -135,206 +154,219 @@ export function CourseDetail() {
           </div>
           {courseData.description && <p className="text-gray-500 mt-3">{courseData.description}</p>}
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => {
-              setEditTitle(courseData.title);
-              setEditDescription(courseData.description || '');
-              setEditDuration(String(courseData.duration_hours || 0));
-              setEditStartDate(courseData.start_date ? format(new Date(courseData.start_date), 'yyyy-MM-dd') : '');
-              setEditEndDate(courseData.end_date ? format(new Date(courseData.end_date), 'yyyy-MM-dd') : '');
-              setShowEditCourse(true);
-            }}
-            className="px-4 py-2 bg-gray-50 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors border border-gray-200 flex items-center gap-2 whitespace-nowrap text-sm"
-          >
-            <Edit3 className="w-4 h-4" /> Editar Curso
-          </button>
-          <button
-            onClick={() => {
-              setReuseTitle(`${courseData.title} (nova turma)`);
-              setReuseStartDate('');
-              setReuseEndDate('');
-              setShowReuseModal(true);
-            }}
-            className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
-          >
-            <Copy className="w-4 h-4" /> Reutilizar Curso
-          </button>
-          <Link 
-            to={`/course/${courseId}/certificates`}
-            className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
-          >
-            <Award className="w-4 h-4" /> Certificados
-          </Link>
-        </div>
+        {!isStudent && (
+          <div className="flex gap-2 flex-wrap mt-4 md:mt-0">
+            <button
+              onClick={() => {
+                setEditTitle(courseData.title);
+                setEditDescription(courseData.description || '');
+                setEditDuration(String(courseData.duration_hours || 0));
+                setEditStartDate(courseData.start_date ? format(new Date(courseData.start_date), 'yyyy-MM-dd') : '');
+                setEditEndDate(courseData.end_date ? format(new Date(courseData.end_date), 'yyyy-MM-dd') : '');
+                setShowEditCourse(true);
+              }}
+              className="px-4 py-2 bg-gray-50 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors border border-gray-200 flex items-center gap-2 whitespace-nowrap text-sm"
+            >
+              <Edit3 className="w-4 h-4" /> Editar Curso
+            </button>
+            <button
+              onClick={() => {
+                setReuseTitle(`${courseData.title} (nova turma)`);
+                setReuseStartDate('');
+                setReuseEndDate('');
+                setShowReuseModal(true);
+              }}
+              className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+            >
+              <Copy className="w-4 h-4" /> Reutilizar Curso
+            </button>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(`${window.location.origin}/#/course-register/${courseId}`);
+                alert('Link de cadastro copiado!');
+              }}
+              className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+            >
+              <LinkIcon className="w-4 h-4" /> Link Inscrição
+            </button>
+            <Link 
+              to={`/course/${courseId}/certificates`}
+              className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+            >
+              <Award className="w-4 h-4" /> Certificados
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-3 gap-8">
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Nova Aula do Curso</h2>
-            <form onSubmit={handleCreateClass} className="space-y-4">
-              <input 
-                type="text" 
-                placeholder="Tema da Aula..." 
-                value={newTitle}
-                onChange={e => setNewTitle(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
-                required
-              />
-              <textarea 
-                placeholder="Prévia da aula (aparecerá na página de cadastro)..." 
-                value={newDescription}
-                onChange={e => setNewDescription(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all h-24 resize-none"
-                required
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-gray-700">Data da Aula</label>
-                  <input 
-                    type="date" 
-                    value={newDate}
-                    onChange={e => setNewDate(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
-                    required
-                  />
+        <div className={clsx("space-y-6", isStudent ? "md:col-span-3" : "md:col-span-2")}>
+          {!isStudent && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">Nova Aula do Curso</h2>
+              <form onSubmit={handleCreateClass} className="space-y-4">
+                <input 
+                  type="text" 
+                  placeholder="Tema da Aula..." 
+                  value={newTitle}
+                  onChange={e => setNewTitle(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
+                  required
+                />
+                <textarea 
+                  placeholder="Prévia da aula (aparecerá na página de cadastro)..." 
+                  value={newDescription}
+                  onChange={e => setNewDescription(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all h-24 resize-none"
+                  required
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium text-gray-700">Data da Aula</label>
+                    <input 
+                      type="date" 
+                      value={newDate}
+                      onChange={e => setNewDate(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium text-gray-700">Horário Previsto</label>
+                    <input 
+                      type="time" 
+                      value={newTime}
+                      onChange={e => setNewTime(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+                      required
+                    />
+                  </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-gray-700">Horário Previsto</label>
-                  <input 
-                    type="time" 
-                    value={newTime}
-                    onChange={e => setNewTime(e.target.value)}
+                  <label className="text-sm font-medium text-gray-700">Professor Auxiliar (opcional)</label>
+                  <select
+                    value={auxiliaryTeacherId}
+                    onChange={e => setAuxiliaryTeacherId(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
-                    required
-                  />
+                  >
+                    <option value="">Nenhum</option>
+                    {allUsers.filter(u => u.id !== user?.id).map(u => (
+                      <option key={u.id} value={u.id}>{u.name} {u.cargo ? `(${u.cargo})` : ''}</option>
+                    ))}
+                  </select>
                 </div>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-gray-700">Professor Auxiliar (opcional)</label>
-                <select
-                  value={auxiliaryTeacherId}
-                  onChange={e => setAuxiliaryTeacherId(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none"
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo de Aula</label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewClassType('presential')}
+                      className={clsx(
+                        'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                        newClassType === 'presential'
+                          ? 'border-teal-500 bg-teal-50 text-teal-700'
+                          : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      Presencial
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewClassType('online')}
+                      className={clsx(
+                        'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                        newClassType === 'online'
+                          ? 'border-teal-500 bg-teal-50 text-teal-700'
+                          : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      Online
+                    </button>
+                  </div>
+                </div>
+
+                {newClassType === 'online' && (
+                  <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                    <div>
+                      <label className="block text-sm font-medium text-blue-800 mb-1">Tempo esperado total</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={newExpectedDuration}
+                          onChange={e => setNewExpectedDuration(e.target.value)}
+                          className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
+                          min="1"
+                          required
+                        />
+                        <span className="text-sm text-blue-600 font-medium flex-shrink-0">min</span>
+                      </div>
+                      <p className="text-xs text-blue-500 mt-1">Para calcular % de presença</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-blue-800 mb-1">Mínimo por slide</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={newSlideMinSeconds}
+                          onChange={e => setNewSlideMinSeconds(e.target.value)}
+                          className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
+                          min="1"
+                          required
+                        />
+                        <span className="text-sm text-blue-600 font-medium flex-shrink-0">seg</span>
+                      </div>
+                      <p className="text-xs text-blue-500 mt-1">Trava para avançar slide</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-gray-700">Pontuação da Aula</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <span className="text-xs text-gray-500">Início</span>
+                      <input type="number" min="0" value={pointsStart} onChange={e => setPointsStart(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500">Meio</span>
+                      <input type="number" min="0" value={pointsMiddle} onChange={e => setPointsMiddle(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500">Fim</span>
+                      <input type="number" min="0" value={pointsEnd} onChange={e => setPointsEnd(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Total: {(parseInt(pointsStart, 10) || 0) + (parseInt(pointsMiddle, 10) || 0) + (parseInt(pointsEnd, 10) || 0)} pts. Você pode alterar a qualquer momento na aula.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
+                  <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
+                    {newPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
+                    <span className={clsx('text-sm', newPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
+                      {newPdfFile ? newPdfFile.name : 'Selecionar PDF (os QR de presença aparecem durante a apresentação)'}
+                    </span>
+                    <input type="file" accept="application/pdf" className="hidden"
+                      onChange={e => setNewPdfFile(e.target.files?.[0] || null)} />
+                  </label>
+                </div>
+
+                <button
+                  type="submit" 
+                  disabled={isCreating || !newTitle.trim()}
+                  className="px-6 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                 >
-                  <option value="">Nenhum</option>
-                  {allUsers.filter(u => u.id !== user?.id).map(u => (
-                    <option key={u.id} value={u.id}>{u.name} {u.cargo ? `(${u.cargo})` : ''}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo de Aula</label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setNewClassType('presential')}
-                    className={clsx(
-                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
-                      newClassType === 'presential'
-                        ? 'border-teal-500 bg-teal-50 text-teal-700'
-                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
-                    )}
-                  >
-                    Presencial
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewClassType('online')}
-                    className={clsx(
-                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
-                      newClassType === 'online'
-                        ? 'border-teal-500 bg-teal-50 text-teal-700'
-                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
-                    )}
-                  >
-                    Online
-                  </button>
-                </div>
-              </div>
-
-              {newClassType === 'online' && (
-                <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
-                  <div>
-                    <label className="block text-sm font-medium text-blue-800 mb-1">Tempo esperado total</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={newExpectedDuration}
-                        onChange={e => setNewExpectedDuration(e.target.value)}
-                        className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
-                        min="1"
-                        required
-                      />
-                      <span className="text-sm text-blue-600 font-medium flex-shrink-0">min</span>
-                    </div>
-                    <p className="text-xs text-blue-500 mt-1">Para calcular % de presença</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-blue-800 mb-1">Mínimo por slide</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={newSlideMinSeconds}
-                        onChange={e => setNewSlideMinSeconds(e.target.value)}
-                        className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none bg-white"
-                        min="1"
-                        required
-                      />
-                      <span className="text-sm text-blue-600 font-medium flex-shrink-0">seg</span>
-                    </div>
-                    <p className="text-xs text-blue-500 mt-1">Trava para avançar slide</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-gray-700">Pontuação da Aula</label>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <span className="text-xs text-gray-500">Início</span>
-                    <input type="number" min="0" value={pointsStart} onChange={e => setPointsStart(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
-                  </div>
-                  <div>
-                    <span className="text-xs text-gray-500">Meio</span>
-                    <input type="number" min="0" value={pointsMiddle} onChange={e => setPointsMiddle(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
-                  </div>
-                  <div>
-                    <span className="text-xs text-gray-500">Fim</span>
-                    <input type="number" min="0" value={pointsEnd} onChange={e => setPointsEnd(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400">
-                  Total: {(parseInt(pointsStart, 10) || 0) + (parseInt(pointsMiddle, 10) || 0) + (parseInt(pointsEnd, 10) || 0)} pts. Você pode alterar a qualquer momento na aula.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
-                <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
-                  {newPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
-                  <span className={clsx('text-sm', newPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
-                    {newPdfFile ? newPdfFile.name : 'Selecionar PDF (os QR de presença aparecem durante a apresentação)'}
-                  </span>
-                  <input type="file" accept="application/pdf" className="hidden"
-                    onChange={e => setNewPdfFile(e.target.files?.[0] || null)} />
-                </label>
-              </div>
-
-              <button
-                type="submit" 
-                disabled={isCreating || !newTitle.trim()}
-                className="px-6 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Criar Aula
-              </button>
-            </form>
-          </div>
+                  <Plus className="w-4 h-4" /> Criar Aula
+                </button>
+              </form>
+            </div>
+          )}
 
           <div className="space-y-4">
             <h2 className="text-lg font-medium text-gray-900">Aulas</h2>
@@ -353,34 +385,53 @@ export function CourseDetail() {
                         {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
                       </div>
                     </Link>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <button
-                        onClick={async () => {
-                          const newTitle = `${c.title} (cópia)`;
-                          try {
-                            const newClass = await api.post(`/classes/${c.id}/reuse`, {
-                              course_id: parseInt(courseId!),
-                              title: newTitle,
-                            });
-                            loadData();
-                          } catch (err: any) {
-                            alert(err?.message || 'Erro ao reutilizar aula');
-                          }
-                        }}
-                        className="text-xs text-teal-600 hover:text-teal-800 hover:bg-teal-50 px-2 py-1 rounded transition-colors font-medium"
-                        title="Reutilizar aula"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                      <Link to={`/class/${c.id}`}>
-                        <span className={clsx("text-xs font-medium px-2 py-1 rounded-full", {
-                          "bg-yellow-100 text-yellow-800": c.status === 'scheduled',
-                          "bg-green-100 text-green-800": c.status === 'active',
-                          "bg-gray-100 text-gray-800": c.status === 'completed',
-                        })}>
-                          {c.status === 'scheduled' ? 'Agendado' : c.status === 'active' ? 'Em andamento' : 'Concluído'}
-                        </span>
-                      </Link>
+                    <div className="flex items-center gap-2">
+                      {isStudent ? (
+                        <>
+                          {c.type === 'online' && c.status === 'active' && (
+                            <Link to={`/online-class/${c.id}`} className="text-xs font-medium px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors">
+                              Acessar Aula
+                            </Link>
+                          )}
+                          <span className={clsx("text-xs font-medium px-2 py-1 rounded-full", {
+                            "bg-yellow-100 text-yellow-800": c.status === 'scheduled',
+                            "bg-green-100 text-green-800": c.status === 'active',
+                            "bg-gray-100 text-gray-800": c.status === 'completed',
+                          })}>
+                            {c.status === 'scheduled' ? 'Agendado' : c.status === 'active' ? 'Em andamento' : 'Concluído'}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={async () => {
+                              const newTitle = `${c.title} (cópia)`;
+                              try {
+                                const newClass = await api.post(`/classes/${c.id}/reuse`, {
+                                  course_id: parseInt(courseId!),
+                                  title: newTitle,
+                                });
+                                loadData();
+                              } catch (err: any) {
+                                alert(err?.message || 'Erro ao reutilizar aula');
+                              }
+                            }}
+                            className="text-xs text-teal-600 hover:text-teal-800 hover:bg-teal-50 px-2 py-1 rounded transition-colors font-medium"
+                            title="Reutilizar aula"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          <Link to={`/class/${c.id}`}>
+                            <span className={clsx("text-xs font-medium px-2 py-1 rounded-full", {
+                              "bg-yellow-100 text-yellow-800": c.status === 'scheduled',
+                              "bg-green-100 text-green-800": c.status === 'active',
+                              "bg-gray-100 text-gray-800": c.status === 'completed',
+                            })}>
+                              {c.status === 'scheduled' ? 'Agendado' : c.status === 'active' ? 'Em andamento' : 'Concluído'}
+                            </span>
+                          </Link>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -389,43 +440,79 @@ export function CourseDetail() {
           </div>
         </div>
 
-        <div className="md:col-span-1">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 sticky top-24">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart className="w-5 h-5 text-teal-600" />
-              <h2 className="text-lg font-medium text-gray-900">Desempenho Geral</h2>
-            </div>
-            
-            <p className="text-sm text-gray-500 mb-4">
-              O certificado exige mínimo de <strong className="text-gray-700">75%</strong> de presença. 
-              {classes.length > 0 ? ` Baseado em ${classes.length} aulas registradas.` : ''}
-            </p>
-
-            {studentsReport.length === 0 ? (
-              <div className="text-center p-4 bg-gray-50 rounded-lg text-sm text-gray-500">
-                Nenhum dado de presença coletado ainda.
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                {studentsReport.map((s: any) => (
-                  <div key={s.identifier} className="flex flex-col gap-1 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                      <div className="flex justify-between items-start">
-                        <span className="font-medium text-sm text-gray-900 line-clamp-1">{s.full_name}</span>
-                        <span className={clsx("text-xs font-bold px-2 py-0.5 rounded", s.approved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
-                          {Math.round(s.percentage)}%
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500 flex items-center gap-2">
-                        <span>Cpf/Email: {maskIdentifier(s.identifier)}</span>
-                        <span className="text-gray-300">|</span>
-                        <span>Avaliação: <strong className="text-teal-600">{s.evaluation_score || 0}%</strong></span>
-                      </div>
-                  </div>
-                ))}
+        {!isStudent && (
+          <div className="md:col-span-1 space-y-6">
+            {pendingRegistrations.length > 0 && (
+              <div className="bg-amber-50 p-6 rounded-xl shadow-sm border border-amber-200">
+                <div className="flex items-center gap-2 mb-4">
+                  <User className="w-5 h-5 text-amber-600" />
+                  <h2 className="text-lg font-medium text-amber-900">Alunos Pendentes ({pendingRegistrations.length})</h2>
+                </div>
+                <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                  {pendingRegistrations.map((reg) => (
+                    <div key={reg.id} className="p-3 bg-white rounded-lg border border-amber-100 shadow-sm text-sm">
+                      <div className="font-medium text-gray-900">{reg.full_name}</div>
+                      <div className="text-xs text-gray-500 mb-2">{reg.identifier} • {reg.department}</div>
+                      <button
+                        onClick={() => {
+                          const mat = prompt('Informe a matrícula para aprovar este aluno (ou deixe em branco para usar o identificador como senha):');
+                          if (mat !== null) {
+                            api.post(`/courses/${courseId}/approve-registration/${reg.id}`, {
+                              matricula: mat,
+                              full_name: reg.full_name,
+                              identifier: reg.identifier,
+                              role: reg.role,
+                              department: reg.department
+                            }).then(() => loadData()).catch(e => alert(e.message));
+                          }
+                        }}
+                        className="w-full py-1.5 bg-amber-500 text-white hover:bg-amber-600 rounded font-medium transition-colors"
+                      >
+                        Aprovar
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
+
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 sticky top-24">
+              <div className="flex items-center gap-2 mb-4">
+                <BarChart className="w-5 h-5 text-teal-600" />
+                <h2 className="text-lg font-medium text-gray-900">Desempenho Geral</h2>
+              </div>
+              
+              <p className="text-sm text-gray-500 mb-4">
+                O certificado exige mínimo de <strong className="text-gray-700">75%</strong> de presença. 
+                {classes.length > 0 ? ` Baseado em ${classes.length} aulas registradas.` : ''}
+              </p>
+
+              {studentsReport.length === 0 ? (
+                <div className="text-center p-4 bg-gray-50 rounded-lg text-sm text-gray-500">
+                  Nenhum dado de presença coletado ainda.
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                  {studentsReport.map((s: any) => (
+                    <div key={s.identifier} className="flex flex-col gap-1 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                        <div className="flex justify-between items-start">
+                          <span className="font-medium text-sm text-gray-900 line-clamp-1">{s.full_name}</span>
+                          <span className={clsx("text-xs font-bold px-2 py-0.5 rounded", s.approved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
+                            {Math.round(s.percentage)}%
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 flex items-center gap-2">
+                          <span>Cpf/Email: {maskIdentifier(s.identifier)}</span>
+                          <span className="text-gray-300">|</span>
+                          <span>Avaliação: <strong className="text-teal-600">{s.evaluation_score || 0}%</strong></span>
+                        </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
 

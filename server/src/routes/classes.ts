@@ -8,15 +8,27 @@ import { upload, UPLOAD_DIR } from '../middleware/upload.js';
 const router = Router();
 
 async function userCanAccessCourse(courseId: string | number, userId: number, role: string): Promise<boolean> {
+  if (role === 'ADMIN') return true;
+
   const { rows } = await pool.query(
     `SELECT 1
      FROM courses c
      LEFT JOIN course_teachers ct ON c.id = ct.course_id
-     WHERE c.id = $1 AND ($2 = 'ADMIN' OR c.owner_id = $3 OR ct.teacher_id = $3)
+     WHERE c.id = $1 AND (c.owner_id = $2 OR ct.teacher_id = $2)
      LIMIT 1`,
-    [courseId, role, userId]
+    [courseId, userId]
   );
-  return rows.length > 0;
+  if (rows.length > 0) return true;
+
+  const { rows: studentRows } = await pool.query(
+    `SELECT 1
+     FROM registrations r
+     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email)
+     WHERE r.course_id = $1 AND u.id = $2
+     LIMIT 1`,
+    [courseId, userId]
+  );
+  return studentRows.length > 0;
 }
 
 async function userCanAccessClass(classId: string, userId: number, role: string): Promise<boolean> {

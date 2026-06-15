@@ -6,15 +6,27 @@ import { normalizeIdentifier } from '../lib/identifier.js';
 const router = Router();
 
 async function userCanAccessCourse(courseId: string, userId: number, role: string): Promise<boolean> {
+  if (role === 'ADMIN') return true;
+
   const { rows } = await pool.query(
     `SELECT 1
      FROM courses c
      LEFT JOIN course_teachers ct ON c.id = ct.course_id
-     WHERE c.id = $1 AND ($2 = 'ADMIN' OR c.owner_id = $3 OR ct.teacher_id = $3)
+     WHERE c.id = $1 AND (c.owner_id = $2 OR ct.teacher_id = $2)
      LIMIT 1`,
-    [courseId, role, userId]
+    [courseId, userId]
   );
-  return rows.length > 0;
+  if (rows.length > 0) return true;
+
+  const { rows: studentRows } = await pool.query(
+    `SELECT 1
+     FROM registrations r
+     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email)
+     WHERE r.course_id = $1 AND u.id = $2
+     LIMIT 1`,
+    [courseId, userId]
+  );
+  return studentRows.length > 0;
 }
 
 // GET /api/courses — Listar cursos do usuário (owner ou adicional)
@@ -122,6 +134,100 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   } catch (err) {
     console.error('Get course error:', err);
     res.status(500).json({ error: 'Erro ao buscar curso' });
+  }
+});
+// GET /api/courses/:id/pending-registrations
+router.get('/:id/pending-registrations', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const hasAccess = await userCanAccessCourse(id, req.user!.id, req.user!.system_role);
+    if (!hasAccess) {
+      res.status(403).json({ error: 'Acesso negado' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, identifier, full_name, role, department, created_at
+       FROM registrations
+       WHERE course_id = $1 AND status = 'pending'
+       ORDER BY created_at DESC`,
+      [id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching pending registrations:', err);
+    res.status(500).json({ error: 'Erro ao buscar inscritos pendentes' });
+  }
+});
+
+// POST /api/courses/:id/approve-registration/:registrationId
+router.post('/:id/approve-registration/:registrationId', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { id, registrationId } = req.params;
+  const { matricula, full_name, identifier, email, role, department } = req.body;
+
+  try {
+    const hasAccess = await userCanAccessCourse(id, req.user!.id, req.user!.system_role);
+    if (!hasAccess) {
+      res.status(403).json({ error: 'Acesso negado' });
+      return;
+    }
+
+    // Begin transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Update registration with the potentially edited data
+      const { rows } = await client.query(
+        `UPDATE registrations 
+         SET status = $1, full_name = $2, role = $3, department = $4
+         WHERE id = $5 AND course_id = $6 RETURNING *`,
+        ['approved', full_name || null, role || null, department || null, registrationId, id]
+      );
+
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'Inscrição não encontrada' });
+        await client.query('ROLLBACK');
+        return;
+      }
+
+      const reg = rows[0];
+      const finalIdentifier = identifier || reg.identifier;
+      const finalEmail = email || finalIdentifier;
+
+      // Insert into app_users if not exists
+      const userResult = await client.query('SELECT id FROM app_users WHERE cpf = $1 OR email = $2', [finalIdentifier, finalEmail]);
+      
+      if (userResult.rows.length === 0) {
+        // Create user
+        // Padrão de senha = matrícula (ou cpf se matrícula for null). Aqui vamos usar identifier.
+        import('bcrypt').then(async bcrypt => {
+          const rawPassword = matricula || finalIdentifier;
+          const defaultPassword = String(rawPassword).toLowerCase().replace(/[^a-z0-9]/g, '');
+          const passwordHash = await bcrypt.default.hash(defaultPassword, 10);
+          
+          await client.query(
+            `INSERT INTO app_users (matricula, password_hash, name, cpf, email, cargo, departamento, status, must_change_password)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'Ativo', TRUE)`,
+             [matricula || null, passwordHash, full_name || reg.full_name, finalIdentifier, finalEmail, role || reg.role, department || reg.department]
+          );
+          
+          await client.query('COMMIT');
+          res.json({ message: 'Aprovado e usuário criado', registration: reg });
+        });
+      } else {
+        await client.query('COMMIT');
+        res.json({ message: 'Aprovado com sucesso', registration: reg });
+      }
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error approving registration:', err);
+    res.status(500).json({ error: 'Erro ao aprovar inscrição' });
   }
 });
 

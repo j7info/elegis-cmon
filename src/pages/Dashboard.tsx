@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth, AuthUser } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { Link } from 'react-router-dom';
-import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy } from 'lucide-react';
+import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, Link as LinkIcon } from 'lucide-react';
 import clsx from 'clsx';
 
 const canCreateCourse = (u: AuthUser | null) =>
@@ -180,9 +180,24 @@ export function Dashboard() {
                     <h3 className="text-xl font-semibold text-gray-900 mb-1 truncate group-hover:text-teal-600 transition-colors">{c.title}</h3>
                     {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
                     {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
-                    <div className="mt-auto pt-4 flex items-center justify-between text-teal-600 text-sm font-medium border-t border-gray-50">
-                      Acessar Curso
-                      <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-50">
+                      {!isAluno && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(`${window.location.origin}/#/course-register/${c.id}`);
+                            alert('Link de cadastro copiado!');
+                          }}
+                          className="text-teal-600 hover:text-teal-800 text-sm font-medium flex items-center gap-1 z-10 px-2 py-1 rounded hover:bg-teal-50 transition-colors"
+                        >
+                          <LinkIcon className="w-4 h-4" /> Copiar Link
+                        </button>
+                      )}
+                      <div className="text-teal-600 text-sm font-medium flex items-center gap-1 ml-auto">
+                        Acessar Curso
+                        <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </div>
                     </div>
                   </div>
                 </Link>

@@ -486,11 +486,13 @@ export function ClassDetail() {
     }
   };
 
-  const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
-  const registrationUrl = `${appUrl}/#/register/${classId}`;
+  const shareUrl = `${window.location.origin}/#/s/${classId}/1`;
+  const registrationUrl = `${window.location.origin}/#/course-register/${classData?.course_id || ''}`;
+  
+  const linkToShare = classData?.type === 'online' ? shareUrl : registrationUrl;
 
   const copyLink = () => {
-    navigator.clipboard.writeText(registrationUrl);
+    navigator.clipboard.writeText(linkToShare);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
   };
@@ -618,7 +620,7 @@ export function ClassDetail() {
           <h3 className="text-lg font-bold mb-1">Aula presencial agendada</h3>
           <p className="text-teal-600 mb-6">Compartilhe o link de cadastro com os alunos antes de iniciar a aula.</p>
           <div className="flex bg-white rounded-lg border border-teal-200 overflow-hidden shadow-sm">
-            <input type="text" readOnly value={registrationUrl} className="px-4 py-3 outline-none text-gray-500 w-80 text-sm" />
+            <input type="text" readOnly value={linkToShare} className="px-4 py-3 outline-none text-gray-500 w-80 text-sm" />
             <button onClick={copyLink} className="px-6 py-3 bg-teal-600 text-white font-medium hover:bg-teal-700 transition-colors">
               {linkCopied ? 'Copiado!' : 'Copiar'}
             </button>

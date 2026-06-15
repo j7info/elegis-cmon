@@ -20,7 +20,7 @@ function formatTime(seconds: number): string {
 export function OnlineClassView() {
   const { classId } = useParams();
   const { user } = useAuth();
-  const [step, setStep] = useState<'join' | 'loading' | 'viewing' | 'completed' | 'evaluation'>('join');
+  const [step, setStep] = useState<'join' | 'loading' | 'intro' | 'viewing' | 'completed' | 'evaluation'>('join');
 
   // Join form
   const [identifier, setIdentifier] = useState(user?.cpf || user?.email || '');
@@ -54,7 +54,8 @@ export function OnlineClassView() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const minRequired = classData?.slide_minimum_seconds ?? 30;
-  const canAdvance = elapsed >= minRequired && !advancing;
+  const isHistoricalSlide = progress && currentSlide < progress.current_slide;
+  const canAdvance = isHistoricalSlide || (elapsed >= minRequired && !advancing);
 
   // Timer: update elapsed time every second
   useEffect(() => {
@@ -149,18 +150,37 @@ export function OnlineClassView() {
           const pdf = await pdfjsLib.getDocument({ url: fileUrl }).promise;
           setPdfDoc(pdf);
           setTotalSlides(pdf.numPages);
-          setStep('viewing');
-          startSlideTimer();
+          
+          if ((progress?.current_slide || 0) === 0 && !progress?.completed_at) {
+            setStep('intro');
+          } else {
+            setStep('viewing');
+            startSlideTimer();
+          }
         } catch (err) {
           console.error('Load PDF error:', err);
         }
       };
       loadPdf();
     }
-  }, [step, classData?.presentation_url]);
+  }, [step, classData?.presentation_url, progress]);
+
+  // Go to previous slide
+  const handleBack = () => {
+    if (currentSlide > 0) {
+      setCurrentSlide(prev => prev - 1);
+      setAdvanceError(null);
+    }
+  };
 
   // Advance to next slide
   const handleAdvance = async () => {
+    if (isHistoricalSlide) {
+      setCurrentSlide(prev => prev + 1);
+      setAdvanceError(null);
+      return;
+    }
+
     if (!canAdvance || !classId) return;
     setAdvancing(true);
     setAdvanceError(null);
@@ -329,6 +349,48 @@ export function OnlineClassView() {
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
           <p className="text-sm text-gray-500">Preparando aula...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Intro screen
+  if (step === 'intro') {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+          <div className="bg-teal-600 p-8 text-white text-center">
+            <BookOpen className="w-12 h-12 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold">Como funciona a Aula Online</h2>
+          </div>
+          <div className="p-8 space-y-5 text-gray-600">
+            <div className="flex gap-3">
+              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">1</div>
+              <p>Leia atentamente o conteúdo de cada slide da apresentação.</p>
+            </div>
+            <div className="flex gap-3">
+              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">2</div>
+              <p>Você precisará permanecer um <strong>tempo mínimo</strong> em cada slide (indicado no topo da tela).</p>
+            </div>
+            <div className="flex gap-3">
+              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">3</div>
+              <p>O botão de <strong>Avançar</strong> será liberado assim que esse tempo mínimo for atingido.</p>
+            </div>
+            <div className="flex gap-3">
+              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">4</div>
+              <p>Você pode usar o botão <strong>Voltar</strong> a qualquer momento para revisar slides anteriores.</p>
+            </div>
+            
+            <button
+              onClick={() => {
+                setStep('viewing');
+                startSlideTimer();
+              }}
+              className="w-full mt-8 py-3.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors text-lg"
+            >
+              Começar Aula
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -526,6 +588,10 @@ export function OnlineClassView() {
               <span className="text-xs text-green-400 font-bold flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Concluído
               </span>
+            ) : isHistoricalSlide ? (
+              <span className="text-xs text-teal-400 font-bold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Lido
+              </span>
             ) : (
               <>
                 <Clock className="w-4 h-4 text-gray-400" />
@@ -562,25 +628,41 @@ export function OnlineClassView() {
 
       {/* Bottom bar */}
       <footer className="bg-gray-800 border-t border-gray-700 px-4 py-3 flex items-center justify-between flex-shrink-0">
-        {/* Progress bar */}
-        <div className="flex-1 max-w-[200px]">
-          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-teal-500 rounded-full transition-all duration-300"
-              style={{ width: `${slidePct}%` }}
-            />
+        
+        {/* Left: Back button & Progress bar */}
+        <div className="flex-1 flex items-center gap-4">
+          <button
+            onClick={handleBack}
+            disabled={currentSlide === 0}
+            className={clsx(
+              'px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-1 transition-all',
+              currentSlide > 0
+                ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                : 'bg-transparent text-gray-600 cursor-not-allowed opacity-50'
+            )}
+          >
+            <ChevronLeft className="w-4 h-4" /> Voltar
+          </button>
+          
+          <div className="hidden sm:block max-w-[150px] w-full">
+            <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal-500 rounded-full transition-all duration-300"
+                style={{ width: `${slidePct}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-gray-500 mt-1 block">{slidePct}% lido</span>
           </div>
-          <span className="text-[10px] text-gray-500 mt-1 block">{slidePct}% lido</span>
         </div>
 
-        {/* Navigation info */}
+        {/* Center: Error messages */}
         <div className="flex-1 text-center">
           {advanceError && (
             <p className="text-xs text-amber-400">{advanceError}</p>
           )}
         </div>
 
-        {/* Advance button */}
+        {/* Right: Advance button */}
         <div className="flex-1 flex justify-end">
           {currentSlide >= totalSlides - 1 ? (
             <button
@@ -608,10 +690,12 @@ export function OnlineClassView() {
             >
               {advancing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
+              ) : isHistoricalSlide ? (
+                <span className="text-sm">Avançar</span>
               ) : (
-                <ChevronRight className="w-4 h-4" />
+                <span className="text-sm">{canAdvance ? 'Avançar' : `Aguarde ${formatTime(Math.max(0, minRequired - elapsed))}`}</span>
               )}
-              {canAdvance ? 'Avançar' : `Aguarde ${formatTime(Math.max(0, minRequired - elapsed))}`}
+              {!advancing && <ChevronRight className="w-4 h-4" />}
             </button>
           )}
         </div>

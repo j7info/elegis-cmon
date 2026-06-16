@@ -508,10 +508,11 @@ export function ClassDetail() {
     }
   };
 
-  const shareUrl = `${window.location.origin}/#/s/${classId}/1`;
-  const registrationUrl = `${window.location.origin}/#/course-register/${classData?.course_id || ''}`;
+  const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+  const onlineClassUrl = `${appUrl}/#/online-class/${classId}`;
+  const registrationUrl = `${appUrl}/#/course-register/${classData?.course_id || ''}`;
   
-  const linkToShare = classData?.type === 'online' ? shareUrl : registrationUrl;
+  const linkToShare = classData?.type === 'online' ? onlineClassUrl : registrationUrl;
 
   const copyLink = () => {
     navigator.clipboard.writeText(linkToShare);

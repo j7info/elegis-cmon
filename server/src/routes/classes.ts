@@ -502,7 +502,9 @@ router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
        LEFT JOIN student_answers sa ON sa.participant_id = ep.id
        LEFT JOIN alternatives a ON sa.alternative_id = a.id
        LEFT JOIN questions q ON sa.question_id = q.id
+       JOIN evaluations e ON e.id = ep.evaluation_id
        WHERE ep.evaluation_id = ANY($1::int[])
+         AND e.type <> 'online'
        GROUP BY ep.identifier, ep.name, ep.evaluation_id, ep.justification`,
       [evalIds]
     );
@@ -518,6 +520,35 @@ router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
       const existing = agg.get(key) || { name: r.name, total_score: 0, total_possible: 0 };
       existing.total_score += pts;
       existing.total_possible += maxPts;
+      agg.set(key, existing);
+    }
+
+    const { rows: onlineScores } = await pool.query(
+      `WITH ranked AS (
+         SELECT
+           ep.identifier,
+           ep.name,
+           oat.evaluation_id,
+           oat.total_score,
+           oat.total_possible,
+           ROW_NUMBER() OVER (
+             PARTITION BY oat.evaluation_id, ep.identifier
+             ORDER BY oat.percentage DESC, oat.total_score DESC, oat.completed_at DESC
+           ) AS rn
+         FROM online_evaluation_attempts oat
+         JOIN evaluation_participants ep ON ep.id = oat.participant_id
+         WHERE oat.evaluation_id = ANY($1::int[])
+           AND oat.status = 'completed'
+       )
+       SELECT * FROM ranked WHERE rn = 1`,
+      [evalIds]
+    );
+
+    for (const r of onlineScores) {
+      const key = r.identifier;
+      const existing = agg.get(key) || { name: r.name, total_score: 0, total_possible: 0 };
+      existing.total_score += parseInt(r.total_score) || 0;
+      existing.total_possible += parseInt(r.total_possible) || (possibleByEval.get(r.evaluation_id) || 0);
       agg.set(key, existing);
     }
 

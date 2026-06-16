@@ -18,13 +18,184 @@ async function userCanAccessEvaluation(evalId: string, userId: number, role: str
   return rows.length > 0;
 }
 
+async function getOnlineQuestions(client: any, evaluationId: string | number) {
+  const { rows: questions } = await client.query(
+    `SELECT q.id, q.text, q.points, q.order_index,
+            COALESCE(
+              json_agg(
+                json_build_object('id', a.id, 'text', a.text, 'order_index', a.order_index)
+                ORDER BY a.order_index
+              ) FILTER (WHERE a.id IS NOT NULL),
+              '[]'
+            ) AS alternatives
+     FROM questions q
+     LEFT JOIN alternatives a ON a.question_id = q.id
+     WHERE q.evaluation_id = $1
+     GROUP BY q.id, q.text, q.points, q.order_index
+     ORDER BY q.order_index`,
+    [evaluationId]
+  );
+  return questions;
+}
+
+async function completeOnlineAttempt(client: any, attemptId: number, questions: any[]) {
+  const totalPossible = questions.reduce((sum, q) => sum + (parseInt(q.points) || 0), 0);
+  const { rows: [scoreRow] } = await client.query(
+    `SELECT COALESCE(SUM(points_awarded), 0)::int AS total_score
+     FROM online_evaluation_attempt_answers
+     WHERE attempt_id = $1`,
+    [attemptId]
+  );
+  const totalScore = parseInt(scoreRow?.total_score) || 0;
+  const percentage = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+
+  const { rows: [attempt] } = await client.query(
+    `UPDATE online_evaluation_attempts
+     SET status = 'completed',
+         completed_at = COALESCE(completed_at, NOW()),
+         total_score = $1,
+         total_possible = $2,
+         percentage = $3
+     WHERE id = $4
+     RETURNING *`,
+    [totalScore, totalPossible, percentage, attemptId]
+  );
+  return attempt;
+}
+
+async function settleExpiredOnlineQuestion(client: any, attempt: any, evaluation: any, questions: any[]) {
+  if (!attempt || attempt.status !== 'in_progress') return attempt;
+
+  const questionTime = parseInt(evaluation.question_time) || 30;
+  const startedAt = new Date(attempt.question_started_at).getTime();
+  const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+
+  if (elapsedSeconds < questionTime) return attempt;
+
+  const currentQuestion = questions[attempt.current_question_index];
+  if (!currentQuestion) {
+    return completeOnlineAttempt(client, attempt.id, questions);
+  }
+
+  await client.query(
+    `INSERT INTO online_evaluation_attempt_answers
+       (attempt_id, evaluation_id, question_id, alternative_id, is_correct, points_awarded, timed_out)
+     VALUES ($1, $2, $3, NULL, FALSE, 0, TRUE)
+     ON CONFLICT (attempt_id, question_id) DO NOTHING`,
+    [attempt.id, evaluation.id, currentQuestion.id]
+  );
+
+  const nextIndex = attempt.current_question_index + 1;
+  if (nextIndex >= questions.length) {
+    return completeOnlineAttempt(client, attempt.id, questions);
+  }
+
+  const { rows: [updated] } = await client.query(
+    `UPDATE online_evaluation_attempts
+     SET current_question_index = $1,
+         question_started_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [nextIndex, attempt.id]
+  );
+  return updated;
+}
+
+async function buildOnlineAttemptState(client: any, evaluationId: string | number, participant: any) {
+  const { rows: [evaluation] } = await client.query(
+    `SELECT e.*, cl.title AS class_title
+     FROM evaluations e
+     JOIN classes cl ON cl.id = e.class_id
+     WHERE e.id = $1`,
+    [evaluationId]
+  );
+  const questions = await getOnlineQuestions(client, evaluationId);
+
+  const { rows: attemptsBeforeSettle } = await client.query(
+    `SELECT * FROM online_evaluation_attempts
+     WHERE evaluation_id = $1 AND participant_id = $2
+     ORDER BY attempt_number DESC`,
+    [evaluationId, participant.id]
+  );
+
+  let activeAttempt = attemptsBeforeSettle.find((a: any) => a.status === 'in_progress') || null;
+  if (activeAttempt) {
+    activeAttempt = await settleExpiredOnlineQuestion(client, activeAttempt, evaluation, questions);
+  }
+
+  const { rows: attempts } = await client.query(
+    `SELECT * FROM online_evaluation_attempts
+     WHERE evaluation_id = $1 AND participant_id = $2
+     ORDER BY attempt_number DESC`,
+    [evaluationId, participant.id]
+  );
+
+  activeAttempt = attempts.find((a: any) => a.status === 'in_progress') || null;
+  const completedAttempts = attempts.filter((a: any) => a.status === 'completed');
+  const bestAttempt = completedAttempts
+    .slice()
+    .sort((a: any, b: any) => (b.percentage - a.percentage) || (b.total_score - a.total_score))[0] || null;
+
+  if (!activeAttempt) {
+    return {
+      status: completedAttempts.length >= 3 ? 'attempts_exhausted' : 'idle',
+      evaluation: {
+        id: evaluation.id,
+        title: evaluation.title,
+        class_title: evaluation.class_title,
+        question_time: evaluation.question_time,
+        question_count: questions.length,
+      },
+      participant,
+      attempts_used: completedAttempts.length,
+      attempts_remaining: Math.max(0, 3 - completedAttempts.length),
+      best_attempt: bestAttempt,
+      attempts: completedAttempts,
+    };
+  }
+
+  const currentQuestion = questions[activeAttempt.current_question_index];
+  const startedAt = new Date(activeAttempt.question_started_at).getTime();
+  const questionTime = parseInt(evaluation.question_time) || 30;
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const timeLeft = Math.max(0, questionTime - elapsedSeconds);
+
+  return {
+    status: 'in_progress',
+    evaluation: {
+      id: evaluation.id,
+      title: evaluation.title,
+      class_title: evaluation.class_title,
+      question_time: questionTime,
+      question_count: questions.length,
+    },
+    participant,
+    attempt: activeAttempt,
+    attempts_used: completedAttempts.length,
+    attempts_remaining: Math.max(0, 3 - completedAttempts.length),
+    best_attempt: bestAttempt,
+    question: currentQuestion ? {
+      id: currentQuestion.id,
+      text: currentQuestion.text,
+      points: currentQuestion.points,
+      order_index: currentQuestion.order_index,
+      alternatives: currentQuestion.alternatives,
+    } : null,
+    question_index: activeAttempt.current_question_index,
+    question_started_at: new Date(activeAttempt.question_started_at).getTime(),
+    time_left_seconds: timeLeft,
+  };
+}
+
 // GET /api/classes/:classId/evaluations — Listar avaliações de uma aula
 router.get('/classes/:classId/evaluations', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
       `SELECT e.*,
         (SELECT COUNT(*) FROM questions WHERE evaluation_id = e.id)::int AS question_count,
-        (SELECT COUNT(*) FROM evaluation_participants WHERE evaluation_id = e.id)::int AS participant_count
+        (SELECT COUNT(*) FROM evaluation_participants WHERE evaluation_id = e.id)::int AS participant_count,
+        (SELECT COUNT(*) FROM online_evaluation_attempts WHERE evaluation_id = e.id AND status = 'completed')::int AS completed_attempt_count,
+        (SELECT COUNT(DISTINCT participant_id) FROM online_evaluation_attempts WHERE evaluation_id = e.id AND status = 'completed')::int AS completed_participant_count
        FROM evaluations e
        WHERE e.class_id = $1
        ORDER BY e.created_at DESC`,
@@ -354,6 +525,7 @@ router.post('/evaluations/:id/reset', authMiddleware, isCourseCreatorMiddleware,
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query('DELETE FROM online_evaluation_attempts WHERE evaluation_id = $1', [req.params.id]);
       await client.query('DELETE FROM student_answers WHERE evaluation_id = $1', [req.params.id]);
       await client.query('DELETE FROM evaluation_participants WHERE evaluation_id = $1', [req.params.id]);
       const { rows: [updated] } = await client.query(
@@ -795,8 +967,7 @@ router.put('/evaluations/:evaluationId/participants/:participantId/justify', aut
 
 // ─── Online Evaluation ─────────────────────────────────────────────────────
 
-// POST /api/evaluations/:id/online/start — Aluno inicia avaliação online
-// (verifica se concluiu slides com ≥60% de presença)
+// POST /api/evaluations/:id/online/start — Aluno inicia ou retoma uma tentativa online
 router.post('/evaluations/:id/online/start', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { identifier } = req.body;
@@ -808,9 +979,12 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
 
   const cleanIdentifier = normalizeIdentifier(identifier);
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     // Verifica se a avaliação existe e é online
-    const { rows: evals } = await pool.query(
+    const { rows: evals } = await client.query(
       `SELECT e.*, cl.type AS class_type, cl.expected_duration_minutes
        FROM evaluations e
        JOIN classes cl ON e.class_id = cl.id
@@ -824,22 +998,20 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
 
     const evaluation = evals[0];
     if (evaluation.class_type !== 'online') {
+      await client.query('ROLLBACK');
       res.status(400).json({ error: 'Esta avaliação não é de uma aula online' });
-      return;
-    }
-    if (evaluation.status !== 'draft' && evaluation.status !== 'waiting') {
-      res.status(400).json({ error: 'Avaliação não disponível' });
       return;
     }
 
     // Verifica se o aluno concluiu a aula online com ≥60% de presença
-    const { rows: progress } = await pool.query(
+    const { rows: progress } = await client.query(
       `SELECT * FROM class_online_progress
        WHERE class_id = $1 AND identifier = $2 AND completed_at IS NOT NULL`,
       [evaluation.class_id, cleanIdentifier]
     );
 
     if (progress.length === 0) {
+      await client.query('ROLLBACK');
       res.status(403).json({ error: 'Conclua a leitura dos slides antes de fazer a avaliação' });
       return;
     }
@@ -849,6 +1021,7 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
     const presencePct = Math.min(100, Math.round((prog.total_time_spent_seconds / 60 / expectedMin) * 100));
 
     if (presencePct < 60) {
+      await client.query('ROLLBACK');
       res.status(403).json({
         error: `Presença insuficiente (${presencePct}%). Mínimo de 60% para realizar a avaliação.`,
         presence_percentage: presencePct,
@@ -857,7 +1030,7 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
     }
 
     // Cria/retorna participante
-    const { rows: [participant] } = await pool.query(
+    const { rows: [participant] } = await client.query(
       `INSERT INTO evaluation_participants (evaluation_id, identifier, name)
        VALUES ($1, $2, $3)
        ON CONFLICT (evaluation_id, identifier) DO UPDATE SET name = EXCLUDED.name
@@ -865,13 +1038,189 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
       [id, cleanIdentifier, prog.full_name]
     );
 
-    res.json({
-      participant,
-      presence_percentage: presencePct,
-    });
+    const { rows: existingAttempts } = await client.query(
+      `SELECT * FROM online_evaluation_attempts
+       WHERE evaluation_id = $1 AND participant_id = $2
+       ORDER BY attempt_number DESC
+       FOR UPDATE`,
+      [id, participant.id]
+    );
+
+    const activeAttempt = existingAttempts.find((a: any) => a.status === 'in_progress');
+    const completedCount = existingAttempts.filter((a: any) => a.status === 'completed').length;
+
+    if (!activeAttempt && completedCount < 3) {
+      const maxAttemptNumber = existingAttempts.reduce(
+        (max: number, attempt: any) => Math.max(max, parseInt(attempt.attempt_number) || 0),
+        0
+      );
+      await client.query(
+        `INSERT INTO online_evaluation_attempts
+           (evaluation_id, participant_id, attempt_number, current_question_index, question_started_at)
+         VALUES ($1, $2, $3, 0, NOW())`,
+        [id, participant.id, maxAttemptNumber + 1]
+      );
+    }
+
+    const state = await buildOnlineAttemptState(client, id, participant);
+    await client.query('COMMIT');
+    res.json({ ...state, presence_percentage: presencePct });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Online evaluation start error:', err);
     res.status(500).json({ error: 'Erro ao iniciar avaliação' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/evaluations/:id/online/state — Estado da tentativa atual do aluno
+router.get('/evaluations/:id/online/state', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const identifier = req.query.identifier as string;
+
+  if (!identifier?.trim()) {
+    res.status(400).json({ error: 'Identificador é obrigatório' });
+    return;
+  }
+
+  const cleanIdentifier = normalizeIdentifier(identifier);
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const { rows: [participant] } = await client.query(
+      `SELECT * FROM evaluation_participants
+       WHERE evaluation_id = $1 AND identifier = $2`,
+      [id, cleanIdentifier]
+    );
+
+    if (!participant) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Participante não encontrado. Inicie a avaliação primeiro.' });
+      return;
+    }
+
+    const state = await buildOnlineAttemptState(client, id, participant);
+    await client.query('COMMIT');
+    res.json(state);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Online state error:', err);
+    res.status(500).json({ error: 'Erro ao buscar estado da avaliação' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/evaluations/:id/online/answer — Responde a questão atual da tentativa
+router.post('/evaluations/:id/online/answer', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { identifier, attempt_id, question_id, alternative_id } = req.body;
+
+  if (!identifier?.trim() || !attempt_id || !question_id || !alternative_id) {
+    res.status(400).json({ error: 'Identificador, tentativa, questão e alternativa são obrigatórios' });
+    return;
+  }
+
+  const cleanIdentifier = normalizeIdentifier(identifier);
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [participant] } = await client.query(
+      `SELECT * FROM evaluation_participants
+       WHERE evaluation_id = $1 AND identifier = $2`,
+      [id, cleanIdentifier]
+    );
+
+    if (!participant) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Participante não encontrado' });
+      return;
+    }
+
+    const { rows: [evaluation] } = await client.query('SELECT * FROM evaluations WHERE id = $1', [id]);
+    const questions = await getOnlineQuestions(client, id);
+
+    const { rows: [attemptBeforeSettle] } = await client.query(
+      `SELECT * FROM online_evaluation_attempts
+       WHERE id = $1 AND evaluation_id = $2 AND participant_id = $3 AND status = 'in_progress'
+       FOR UPDATE`,
+      [attempt_id, id, participant.id]
+    );
+
+    if (!attemptBeforeSettle) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'Tentativa não está em andamento' });
+      return;
+    }
+
+    const attempt = await settleExpiredOnlineQuestion(client, attemptBeforeSettle, evaluation, questions);
+    if (!attempt || attempt.status !== 'in_progress') {
+      const state = await buildOnlineAttemptState(client, id, participant);
+      await client.query('COMMIT');
+      res.status(409).json({ error: 'O tempo da questão terminou', state });
+      return;
+    }
+
+    const currentQuestion = questions[attempt.current_question_index];
+    if (!currentQuestion || parseInt(currentQuestion.id) !== parseInt(question_id)) {
+      const state = await buildOnlineAttemptState(client, id, participant);
+      await client.query('COMMIT');
+      res.status(409).json({ error: 'Esta questão não está mais disponível', state });
+      return;
+    }
+
+    const alternatives = currentQuestion.alternatives || [];
+    if (!alternatives.some((alt: any) => parseInt(alt.id) === parseInt(alternative_id))) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'Alternativa inválida para esta questão' });
+      return;
+    }
+
+    const { rows: [answerData] } = await client.query(
+      `SELECT a.id, a.is_correct, q.points
+       FROM alternatives a
+       JOIN questions q ON q.id = a.question_id
+       WHERE a.id = $1 AND q.id = $2`,
+      [alternative_id, question_id]
+    );
+
+    const isCorrect = Boolean(answerData?.is_correct);
+    const pointsAwarded = isCorrect ? (parseInt(answerData?.points) || 0) : 0;
+
+    await client.query(
+      `INSERT INTO online_evaluation_attempt_answers
+         (attempt_id, evaluation_id, question_id, alternative_id, is_correct, points_awarded, timed_out)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+       ON CONFLICT (attempt_id, question_id) DO NOTHING`,
+      [attempt.id, id, question_id, alternative_id, isCorrect, pointsAwarded]
+    );
+
+    const nextIndex = attempt.current_question_index + 1;
+    if (nextIndex >= questions.length) {
+      await completeOnlineAttempt(client, attempt.id, questions);
+    } else {
+      await client.query(
+        `UPDATE online_evaluation_attempts
+         SET current_question_index = $1,
+             question_started_at = NOW()
+         WHERE id = $2`,
+        [nextIndex, attempt.id]
+      );
+    }
+
+    const state = await buildOnlineAttemptState(client, id, participant);
+    await client.query('COMMIT');
+    res.json(state);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Online answer error:', err);
+    res.status(500).json({ error: 'Erro ao registrar resposta' });
+  } finally {
+    client.release();
   }
 });
 

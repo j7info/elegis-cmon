@@ -274,4 +274,36 @@ router.get('/:id/online/slides', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/classes/:id/online/evaluation — Avaliação online vinculada à aula
+router.get('/:id/online/evaluation', async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT e.id, e.title, e.question_time,
+              COUNT(q.id)::int AS question_count
+       FROM evaluations e
+       LEFT JOIN questions q ON q.evaluation_id = e.id
+       JOIN classes cl ON cl.id = e.class_id
+       WHERE e.class_id = $1
+         AND e.type = 'online'
+         AND cl.type = 'online'
+       GROUP BY e.id, e.title, e.question_time
+       ORDER BY e.created_at DESC
+       LIMIT 1`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Nenhuma avaliação online disponível para esta aula' });
+      return;
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Online evaluation lookup error:', err);
+    res.status(500).json({ error: 'Erro ao buscar avaliação online' });
+  }
+});
+
 export default router;

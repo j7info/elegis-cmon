@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import bcrypt from 'bcrypt';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware } from '../middleware/auth.js';
 import { normalizeIdentifier } from '../lib/identifier.js';
@@ -164,6 +165,12 @@ router.get('/:id/pending-registrations', authMiddleware, async (req: AuthRequest
 router.post('/:id/approve-registration/:registrationId', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id, registrationId } = req.params;
   const { matricula, full_name, identifier, email, role, department } = req.body;
+  const matriculaClean = matricula?.trim() ? String(matricula).trim().toUpperCase() : null;
+
+  if (matriculaClean && !/^[A-Z]{4}\d{5}$/.test(matriculaClean)) {
+    res.status(400).json({ error: 'Matrícula deve estar no formato LLLLNNNNN (4 letras + 5 números)' });
+    return;
+  }
 
   try {
     const hasAccess = await userCanAccessCourse(id, req.user!.id, req.user!.system_role);
@@ -192,30 +199,93 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
       }
 
       const reg = rows[0];
-      const finalIdentifier = identifier || reg.identifier;
-      const finalEmail = email || finalIdentifier;
+      const finalIdentifier = normalizeIdentifier(identifier || reg.identifier);
+      const emailClean = email?.trim() || (finalIdentifier.includes('@') ? finalIdentifier : null);
+      const cpfClean = finalIdentifier.includes('@') ? null : finalIdentifier;
 
-      // Insert into app_users if not exists
-      const userResult = await client.query('SELECT id FROM app_users WHERE cpf = $1 OR email = $2', [finalIdentifier, finalEmail]);
-      
-      if (userResult.rows.length === 0) {
-        // Create user
-        // Padrão de senha = matrícula (ou cpf se matrícula for null). Aqui vamos usar identifier.
-        import('bcrypt').then(async bcrypt => {
-          const rawPassword = matricula || finalIdentifier;
-          const defaultPassword = String(rawPassword).toLowerCase().replace(/[^a-z0-9]/g, '');
-          const passwordHash = await bcrypt.default.hash(defaultPassword, 10);
-          
-          await client.query(
-            `INSERT INTO app_users (matricula, password_hash, name, cpf, email, cargo, departamento, status, must_change_password)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'Ativo', TRUE)`,
-             [matricula || null, passwordHash, full_name || reg.full_name, finalIdentifier, finalEmail, role || reg.role, department || reg.department]
-          );
-          
-          await client.query('COMMIT');
-          res.json({ message: 'Aprovado e usuário criado', registration: reg });
-        });
+      if (matriculaClean) {
+        const { rows: matriculaConflict } = await client.query(
+          `SELECT id FROM app_users
+           WHERE matricula = $1
+             AND NOT (
+               ($2::text IS NOT NULL AND cpf = $2)
+               OR ($3::text IS NOT NULL AND email = $3)
+             )
+           LIMIT 1`,
+          [matriculaClean, cpfClean, emailClean]
+        );
+
+        if (matriculaConflict.length > 0) {
+          await client.query('ROLLBACK');
+          res.status(409).json({ error: 'Matrícula já cadastrada para outro usuário' });
+          return;
+        }
+      }
+
+      const { rows: existingUsers } = await client.query(
+        `SELECT * FROM app_users
+         WHERE ($1::text IS NOT NULL AND cpf = $1)
+            OR ($2::text IS NOT NULL AND email = $2)
+            OR ($3::text IS NOT NULL AND matricula = $3)
+         ORDER BY is_pre_registered DESC, id
+         LIMIT 1`,
+        [cpfClean, emailClean, matriculaClean]
+      );
+
+      if (existingUsers.length === 0) {
+        const rawPassword = matriculaClean || finalIdentifier;
+        const defaultPassword = String(rawPassword).toLowerCase().replace(/[^a-z0-9]/g, '');
+        const passwordHash = await bcrypt.hash(defaultPassword || '123456', 12);
+
+        await client.query(
+          `INSERT INTO app_users
+             (matricula, password_hash, name, cpf, email, cargo, departamento, status, is_pre_registered, must_change_password)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'Ativo', FALSE, TRUE)`,
+          [
+            matriculaClean,
+            passwordHash,
+            full_name || reg.full_name,
+            cpfClean,
+            emailClean,
+            role || reg.role,
+            department || reg.department,
+          ]
+        );
+
+        await client.query('COMMIT');
+        res.json({ message: 'Aprovado e usuário criado', registration: reg });
       } else {
+        const existing = existingUsers[0];
+
+        if (matriculaClean && existing.matricula && existing.matricula !== matriculaClean) {
+          await client.query('ROLLBACK');
+          res.status(409).json({ error: 'Este aluno já possui outra matrícula cadastrada' });
+          return;
+        }
+
+        await client.query(
+          `UPDATE app_users SET
+             matricula = COALESCE(matricula, $1),
+             name = COALESCE($2, name),
+             cpf = COALESCE(cpf, $3),
+             email = COALESCE(email, $4),
+             cargo = COALESCE($5, cargo),
+             departamento = COALESCE($6, departamento),
+             status = 'Ativo',
+             is_pre_registered = FALSE,
+             updated_at = NOW()
+           WHERE id = $7`,
+          [
+            matriculaClean,
+            full_name || reg.full_name,
+            cpfClean,
+            emailClean,
+            role || reg.role,
+            department || reg.department,
+            existing.id,
+          ]
+        );
+
         await client.query('COMMIT');
         res.json({ message: 'Aprovado com sucesso', registration: reg });
       }

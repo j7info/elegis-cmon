@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { normalizeIdentifier } from '../lib/identifier';
 import * as pdfjsLib from 'pdfjs-dist';
 import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award } from 'lucide-react';
-import clsx from 'clsx';import { useAuth } from '../lib/AuthContext';
+import clsx from 'clsx';
+import { useAuth } from '../lib/AuthContext';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -36,11 +36,10 @@ export function OnlineClassView() {
   const [presencePct, setPresencePct] = useState<number | null>(null);
 
   // Evaluation state
-  const [evalQuestions, setEvalQuestions] = useState<any[]>([]);
-  const [evalParticipant, setEvalParticipant] = useState<any>(null);
-  const [evalAnswers, setEvalAnswers] = useState<Record<number, number>>({});
+  const [onlineEvalState, setOnlineEvalState] = useState<any>(null);
+  const [selectedAlternativeId, setSelectedAlternativeId] = useState<number | null>(null);
+  const [evalTimerLeft, setEvalTimerLeft] = useState<number | null>(null);
   const [evalSubmitting, setEvalSubmitting] = useState(false);
-  const [evalResult, setEvalResult] = useState<any>(null);
   const [evalError, setEvalError] = useState<string | null>(null);
   const [loadEvalId, setLoadEvalId] = useState<number | null>(null);
 
@@ -223,61 +222,71 @@ export function OnlineClassView() {
     }
   };
 
+  const refreshEvaluationState = useCallback(async () => {
+    if (!loadEvalId || !identifier.trim()) return;
+    const stateRes = await api.get(`/evaluations/${loadEvalId}/online/state?identifier=${encodeURIComponent(identifier.trim())}`);
+    setOnlineEvalState(stateRes);
+    setSelectedAlternativeId(null);
+  }, [loadEvalId, identifier]);
+
+  useEffect(() => {
+    if (step !== 'evaluation' || onlineEvalState?.status !== 'in_progress') return;
+
+    const interval = setInterval(() => {
+      const startedAt = onlineEvalState.question_started_at || Date.now();
+      const questionTime = onlineEvalState.evaluation?.question_time || 30;
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const remaining = Math.max(0, questionTime - elapsed);
+      setEvalTimerLeft(remaining);
+
+      if (remaining === 0) {
+        refreshEvaluationState().catch(() => {});
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [step, onlineEvalState, refreshEvaluationState]);
+
   // Start evaluation
   const handleStartEvaluation = async () => {
     if (!classId) return;
     setEvalError(null);
+    setEvalSubmitting(true);
     try {
-      // Encontra a primeira avaliação online vinculada a esta aula
-      const evals = await api.get(`/classes/${classId}/evaluations`);
-      const onlineEval = evals.find((e: any) => e.type === 'online');
-      if (!onlineEval) {
-        setEvalError('Nenhuma avaliação disponível para esta aula');
-        return;
-      }
-
-      // Inicia a avaliação
+      const onlineEval = await api.get(`/classes/${classId}/online/evaluation`);
       const startRes = await api.post(`/evaluations/${onlineEval.id}/online/start`, {
         identifier: identifier.trim(),
       });
-      setEvalParticipant(startRes.participant);
       setLoadEvalId(onlineEval.id);
-
-      // Carrega perguntas
-      const qRes = await api.get(`/evaluations/${onlineEval.id}/online/questions?identifier=${encodeURIComponent(identifier.trim())}`);
-      if (qRes.already_answered) {
-        setEvalResult({ ...qRes, total_possible: qRes.total_possible || 1 });
-        setEvalQuestions([]);
-        setStep('evaluation');
-        return;
-      }
-      setEvalQuestions(qRes.questions || []);
-      setEvalAnswers({});
+      setOnlineEvalState(startRes);
+      setSelectedAlternativeId(null);
+      setEvalTimerLeft(startRes.time_left_seconds ?? startRes.evaluation?.question_time ?? null);
       setStep('evaluation');
     } catch (err: any) {
-      setEvalError(err?.response?.data?.error || 'Erro ao iniciar avaliação');
+      setEvalError(err?.message || 'Erro ao iniciar avaliação');
+    } finally {
+      setEvalSubmitting(false);
     }
   };
 
-  // Submit evaluation
-  const handleSubmitEvaluation = async () => {
-    if (!loadEvalId || !classId) return;
+  const handleAnswerEvaluation = async (alternativeId: number) => {
+    if (!loadEvalId || !onlineEvalState?.attempt || !onlineEvalState?.question || evalSubmitting || selectedAlternativeId) return;
     setEvalSubmitting(true);
     setEvalError(null);
+    setSelectedAlternativeId(alternativeId);
     try {
-      const answers = Object.entries(evalAnswers).map(([qId, altIdx]) => {
-        const question = evalQuestions.find((q: any) => q.id === parseInt(qId));
-        const alt = question?.alternatives[altIdx];
-        return { question_id: parseInt(qId), alternative_id: alt?.id || null };
-      });
-
-      const res = await api.post(`/evaluations/${loadEvalId}/online/submit`, {
+      const res = await api.post(`/evaluations/${loadEvalId}/online/answer`, {
         identifier: identifier.trim(),
-        answers,
+        attempt_id: onlineEvalState.attempt.id,
+        question_id: onlineEvalState.question.id,
+        alternative_id: alternativeId,
       });
-      setEvalResult(res);
+      setOnlineEvalState(res);
+      setSelectedAlternativeId(null);
+      setEvalTimerLeft(res.time_left_seconds ?? res.evaluation?.question_time ?? null);
     } catch (err: any) {
-      setEvalError(err?.response?.data?.error || 'Erro ao enviar respostas');
+      setEvalError(err?.message || 'Não foi possível registrar a resposta');
+      await refreshEvaluationState().catch(() => {});
     } finally {
       setEvalSubmitting(false);
     }
@@ -470,6 +479,14 @@ export function OnlineClassView() {
 
   // Evaluation screen
   if (step === 'evaluation') {
+    const question = onlineEvalState?.question;
+    const bestAttempt = onlineEvalState?.best_attempt;
+    const attemptsRemaining = onlineEvalState?.attempts_remaining ?? 0;
+    const questionTime = onlineEvalState?.evaluation?.question_time || 30;
+    const timeLeft = evalTimerLeft ?? onlineEvalState?.time_left_seconds ?? questionTime;
+    const timerPct = questionTime > 0 ? Math.max(0, Math.min(100, ((questionTime - timeLeft) / questionTime) * 100)) : 0;
+    const isFinished = onlineEvalState?.status === 'idle' || onlineEvalState?.status === 'attempts_exhausted';
+
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
@@ -478,58 +495,84 @@ export function OnlineClassView() {
             <h1 className="text-xl font-bold flex items-center gap-2">
               <HelpCircle className="w-6 h-6" /> Avaliação
             </h1>
-            <p className="text-sm text-teal-100 mt-1">{classData?.title} — Responda todas as questões</p>
+            <p className="text-sm text-teal-100 mt-1">
+              {onlineEvalState?.evaluation?.title || classData?.title}
+            </p>
           </div>
 
-          <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-            {evalResult ? (
+          <div className="p-6 space-y-6">
+            {isFinished ? (
               <div className="text-center py-8">
                 <Award className="w-16 h-16 text-teal-500 mx-auto mb-4" />
-                <h2 className="text-2xl font-black text-gray-900 mb-2">
-                  {evalResult.percentage}%
-                </h2>
+                <h2 className="text-2xl font-black text-gray-900 mb-2">Avaliação concluída</h2>
                 <p className="text-gray-500">
-                  {evalResult.total_score} de {evalResult.total_possible} pontos
+                  Melhor nota: <strong className="text-teal-700">{bestAttempt?.percentage ?? 0}%</strong>
+                  {' '}({bestAttempt?.total_score ?? 0} de {bestAttempt?.total_possible ?? 0} pontos)
                 </p>
+                <p className="text-sm text-gray-400 mt-2">
+                  Tentativas usadas: {onlineEvalState?.attempts_used ?? 0} de 3
+                </p>
+                {attemptsRemaining > 0 && (
+                  <button
+                    onClick={handleStartEvaluation}
+                    disabled={evalSubmitting}
+                    className="mt-6 px-6 py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-bold transition-colors"
+                  >
+                    Fazer nova tentativa ({attemptsRemaining} restante{attemptsRemaining > 1 ? 's' : ''})
+                  </button>
+                )}
               </div>
-            ) : evalQuestions.length === 0 ? (
-              <p className="text-center text-gray-400 py-8">Carregando perguntas...</p>
+            ) : !question ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-10 h-10 text-teal-600 animate-spin mx-auto mb-3" />
+                <p className="text-gray-400">Carregando questão...</p>
+              </div>
             ) : (
-              evalQuestions.map((q: any, qIdx: number) => {
-                const selectedAltIdx = evalAnswers[q.id] ?? -1;
-                return (
-                  <div key={q.id} className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-                    <div className="flex items-start justify-between mb-3">
-                      <h3 className="font-bold text-gray-900 text-sm leading-relaxed flex-1">
-                        <span className="text-teal-600 mr-2">{qIdx + 1}.</span>
-                        {q.text}
-                      </h3>
-                      <span className="text-xs font-medium text-gray-400 bg-white px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
-                        {q.points} pts
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      {q.alternatives.map((alt: any, aIdx: number) => (
-                        <button
-                          key={alt.id}
-                          onClick={() => setEvalAnswers(prev => ({ ...prev, [q.id]: aIdx }))}
-                          className={clsx(
-                            'w-full text-left px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all',
-                            selectedAltIdx === aIdx
-                              ? 'border-teal-500 bg-teal-50 text-teal-800'
-                              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                          )}
-                        >
-                          <span className="mr-2 font-bold text-xs">
-                            {String.fromCharCode(65 + aIdx)}
-                          </span>
-                          {alt.text}
-                        </button>
-                      ))}
-                    </div>
+              <div className="space-y-5">
+                <div>
+                  <div className="flex items-center justify-between gap-4 mb-2">
+                    <span className="text-sm font-bold text-teal-700">
+                      Questão {(onlineEvalState?.question_index ?? 0) + 1} de {onlineEvalState?.evaluation?.question_count || 0}
+                    </span>
+                    <span className={clsx(
+                      'text-sm font-black tabular-nums',
+                      timeLeft > 10 ? 'text-teal-700' : timeLeft > 0 ? 'text-amber-600' : 'text-red-600'
+                    )}>
+                      {timeLeft}s
+                    </span>
                   </div>
-                );
-              })
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-teal-500 transition-all" style={{ width: `${timerPct}%` }} />
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+                  <div className="flex items-start justify-between mb-4">
+                    <h3 className="font-bold text-gray-900 leading-relaxed flex-1">{question.text}</h3>
+                    <span className="text-xs font-medium text-gray-400 bg-white px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
+                      {question.points} pts
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {question.alternatives.map((alt: any, aIdx: number) => (
+                      <button
+                        key={alt.id}
+                        onClick={() => handleAnswerEvaluation(alt.id)}
+                        disabled={evalSubmitting || timeLeft <= 0 || selectedAlternativeId !== null}
+                        className={clsx(
+                          'w-full text-left px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all disabled:cursor-not-allowed',
+                          selectedAlternativeId === alt.id
+                            ? 'border-teal-500 bg-teal-50 text-teal-800'
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 disabled:opacity-60'
+                        )}
+                      >
+                        <span className="mr-2 font-bold text-xs">{String.fromCharCode(65 + aIdx)}</span>
+                        {alt.text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 
@@ -540,7 +583,7 @@ export function OnlineClassView() {
                 {evalError}
               </div>
             )}
-            {evalResult ? (
+            {isFinished ? (
               <Link
                 to="/"
                 className="block w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold text-center transition-colors"
@@ -548,19 +591,9 @@ export function OnlineClassView() {
                 Voltar ao Início
               </Link>
             ) : (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">
-                  {Object.keys(evalAnswers).length} de {evalQuestions.length} respondidas
-                </span>
-                <button
-                  onClick={handleSubmitEvaluation}
-                  disabled={evalSubmitting || Object.keys(evalAnswers).length < evalQuestions.length}
-                  className="px-8 py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-bold transition-colors flex items-center gap-2"
-                >
-                  {evalSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-                  {evalSubmitting ? 'Enviando...' : 'Finalizar Avaliação'}
-                </button>
-              </div>
+              <p className="text-sm text-gray-500 text-center">
+                Ao selecionar uma alternativa, o sistema avança para a próxima questão.
+              </p>
             )}
           </div>
         </div>

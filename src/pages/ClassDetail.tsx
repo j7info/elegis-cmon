@@ -862,7 +862,17 @@ export function ClassDetail() {
                 <div>
                   <h3 className="font-semibold text-gray-900">{ev.title}</h3>
                   <p className="text-sm text-gray-500">
-                    {ev.question_count} pergunta(s) · {ev.participant_count || 0} participante(s) · {ev.question_time}s por pergunta
+                    {ev.question_count} pergunta(s) · {ev.question_time}s por pergunta
+                    {classData.type === 'online' ? (
+                      <> · {ev.completed_participant_count || 0} concluída(s) · {ev.completed_attempt_count || 0} tentativa(s)</>
+                    ) : (
+                      <> · {ev.participant_count || 0} participante(s)</>
+                    )}
+                    {ev.type === 'online' && (
+                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal-100 text-teal-700">
+                        Online
+                      </span>
+                    )}
                     <span className={clsx(
                       "ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
                       ev.status === 'draft' && "bg-gray-100 text-gray-600",
@@ -878,7 +888,28 @@ export function ClassDetail() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {ev.status === 'draft' && (
+                  {classData.type === 'online' ? (
+                    <>
+                      {((ev.participant_count || 0) === 0 && (ev.completed_attempt_count || 0) === 0) && (
+                        <>
+                          <button onClick={() => openEditEvaluation(ev.id)} className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors" title="Editar">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDeleteEvaluation(ev.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                      {((ev.participant_count || 0) > 0 || (ev.completed_attempt_count || 0) > 0) && (
+                        <button onClick={() => handleResetEvaluation(ev.id)} className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-sm font-bold transition-colors">
+                          Limpar tentativas
+                        </button>
+                      )}
+                      <span className="text-xs font-medium text-gray-500 bg-white border border-gray-200 px-3 py-2 rounded-lg">
+                        Disponível após os slides
+                      </span>
+                    </>
+                  ) : ev.status === 'draft' && (
                     <>
                       <button onClick={() => openEditEvaluation(ev.id)} className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors" title="Editar">
                         <Pencil className="w-4 h-4" />

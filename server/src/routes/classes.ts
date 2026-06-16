@@ -591,13 +591,14 @@ router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
          FROM online_evaluation_attempts oat
          JOIN evaluation_participants ep ON ep.id = oat.participant_id
          LEFT JOIN app_users u
-           ON ep.identifier = u.cpf OR ep.identifier = u.email
+           ON ep.identifier = u.cpf OR ep.identifier = u.email OR ep.identifier = u.matricula
          LEFT JOIN registrations r
            ON r.course_id = $2
           AND (
             r.identifier = ep.identifier
             OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
             OR (u.email IS NOT NULL AND r.identifier = u.email)
+            OR (u.matricula IS NOT NULL AND r.identifier = u.matricula)
           )
          WHERE oat.evaluation_id = ANY($1::int[])
            AND oat.status = 'completed'

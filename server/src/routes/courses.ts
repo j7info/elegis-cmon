@@ -56,7 +56,7 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
        FROM courses c
        INNER JOIN registrations r ON r.course_id = c.id
        INNER JOIN app_users u ON u.id = $1
-       WHERE r.identifier = u.cpf OR r.identifier = u.email
+       WHERE r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula
        ORDER BY c.created_at DESC`,
       [req.user!.id]
     );
@@ -352,7 +352,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
     // 1. Busca aluno (normaliza também o valor do banco)
     const { rows: users } = await pool.query(
       `SELECT id, name, cpf, email, departamento, cargo FROM app_users
-       WHERE cpf = $1 OR email = $1`,
+       WHERE cpf = $1 OR email = $1 OR matricula = $1`,
       [clean]
     );
     if (users.length === 0) {

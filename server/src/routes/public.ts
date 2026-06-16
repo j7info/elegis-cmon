@@ -85,7 +85,7 @@ router.post('/courses/:courseId/registrations', async (req: Request, res: Respon
     }
 
     // Verifica se o aluno já existe no sistema
-    const userResult = await pool.query('SELECT id FROM app_users WHERE cpf = $1 OR email = $1 LIMIT 1', [cleanIdentifier]);
+    const userResult = await pool.query('SELECT id FROM app_users WHERE cpf = $1 OR email = $1 OR matricula = $1 LIMIT 1', [cleanIdentifier]);
     const isApproved = userResult.rows.length > 0;
     const status = isApproved ? 'approved' : 'pending';
 

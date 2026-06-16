@@ -89,13 +89,14 @@ async function getEvaluationScoresByClass(classIds: number[]): Promise<Map<strin
        JOIN evaluations e ON e.id = oat.evaluation_id
        JOIN classes c ON c.id = e.class_id
        LEFT JOIN app_users u
-         ON ep.identifier = u.cpf OR ep.identifier = u.email
+         ON ep.identifier = u.cpf OR ep.identifier = u.email OR ep.identifier = u.matricula
        LEFT JOIN registrations r
          ON r.course_id = c.course_id
         AND (
           r.identifier = ep.identifier
           OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
           OR (u.email IS NOT NULL AND r.identifier = u.email)
+          OR (u.matricula IS NOT NULL AND r.identifier = u.matricula)
         )
        WHERE oat.evaluation_id = ANY($1::int[])
          AND oat.status = 'completed'
@@ -161,13 +162,14 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
         FROM class_online_progress p
         JOIN classes oc ON oc.id = p.class_id
         LEFT JOIN app_users u
-          ON p.identifier = u.cpf OR p.identifier = u.email
+          ON p.identifier = u.cpf OR p.identifier = u.email OR p.identifier = u.matricula
         LEFT JOIN registrations r
           ON r.course_id = oc.course_id
          AND (
            r.identifier = p.identifier
            OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
            OR (u.email IS NOT NULL AND r.identifier = u.email)
+           OR (u.matricula IS NOT NULL AND r.identifier = u.matricula)
          )
         WHERE p.class_id = ANY($1)
           AND oc.type = 'online'
@@ -193,9 +195,9 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       )
       SELECT
         a.identifier,
-        MAX(a.full_name) AS full_name,
-        MAX(a.department) AS department,
-        MAX(a.role) AS role,
+        COALESCE(MAX(a.full_name), MAX(u.name)) AS full_name,
+        COALESCE(MAX(a.department), MAX(u.departamento)) AS department,
+        COALESCE(MAX(a.role), MAX(u.cargo)) AS role,
         SUM(
           CASE
             WHEN a.justification IS NOT NULL
@@ -208,6 +210,7 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
         ) AS points
        FROM all_attendances a
        JOIN classes c ON a.class_id = c.id
+       LEFT JOIN app_users u ON u.cpf = a.identifier OR u.email = a.identifier OR u.matricula = a.identifier
        GROUP BY a.identifier
        ORDER BY points DESC`,
       [classIds]

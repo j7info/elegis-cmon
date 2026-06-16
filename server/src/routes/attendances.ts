@@ -52,7 +52,7 @@ router.post('/:classId/scan/:step', async (req: Request, res: Response) => {
     }
 
     // 3. Verifica se o usuário existe no sistema
-    const userResult = await pool.query('SELECT * FROM app_users WHERE cpf = $1 OR email = $1', [cleanIdentifier]);
+    const userResult = await pool.query('SELECT * FROM app_users WHERE cpf = $1 OR email = $1 OR matricula = $1', [cleanIdentifier]);
     if (userResult.rows.length === 0) {
       res.status(404).json({ error: 'USER_NOT_FOUND' });
       return;
@@ -67,8 +67,8 @@ router.post('/:classId/scan/:step', async (req: Request, res: Response) => {
         identifier = $2
         OR EXISTS (
           SELECT 1 FROM app_users u
-          WHERE (u.cpf = $2 AND registrations.identifier = u.email)
-             OR (u.email = $2 AND registrations.identifier = u.cpf)
+          WHERE (u.cpf = $2 OR u.email = $2 OR u.matricula = $2)
+             AND (registrations.identifier = u.cpf OR registrations.identifier = u.email OR registrations.identifier = u.matricula)
         )
       )`,
       [classData.course_id, cleanIdentifier]

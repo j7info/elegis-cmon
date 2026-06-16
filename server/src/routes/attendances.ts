@@ -51,13 +51,23 @@ router.post('/:classId/scan/:step', async (req: Request, res: Response) => {
       return;
     }
 
-    // 3. Verifica se o usuário existe no sistema
+    // 3. Verifica se o usuário existe no sistema ou já está inscrito
     const userResult = await pool.query('SELECT * FROM app_users WHERE cpf = $1 OR email = $1 OR matricula = $1', [cleanIdentifier]);
-    if (userResult.rows.length === 0) {
-      res.status(404).json({ error: 'USER_NOT_FOUND' });
-      return;
+    let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
+
+    if (!user) {
+      // Se não está no sistema, verifica se pelo menos tem inscrição no curso
+      const courseReg = await pool.query(
+        'SELECT full_name as name, role as cargo, department as departamento FROM registrations WHERE course_id = $1 AND identifier = $2 LIMIT 1',
+        [classData.course_id, cleanIdentifier]
+      );
+      if (courseReg.rows.length > 0) {
+        user = courseReg.rows[0];
+      } else {
+        res.status(404).json({ error: 'USER_NOT_FOUND' });
+        return;
+      }
     }
-    const user = userResult.rows[0];
 
     // 4. Verifica se está inscrito no curso
     // Se o identifier do aluno (email) for diferente do usado no registro

@@ -195,9 +195,9 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       )
       SELECT
         a.identifier,
-        COALESCE(MAX(a.full_name), MAX(u.name)) AS full_name,
-        COALESCE(MAX(a.department), MAX(u.departamento)) AS department,
-        COALESCE(MAX(a.role), MAX(u.cargo)) AS role,
+        COALESCE(MAX(a.full_name), MAX(u.name), MAX(r.full_name)) AS full_name,
+        COALESCE(MAX(a.department), MAX(u.departamento), MAX(r.department)) AS department,
+        COALESCE(MAX(a.role), MAX(u.cargo), MAX(r.role)) AS role,
         SUM(
           CASE
             WHEN a.justification IS NOT NULL
@@ -211,6 +211,7 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
        FROM all_attendances a
        JOIN classes c ON a.class_id = c.id
        LEFT JOIN app_users u ON u.cpf = a.identifier OR u.email = a.identifier OR u.matricula = a.identifier
+       LEFT JOIN registrations r ON r.identifier = a.identifier AND r.course_id = c.course_id
        GROUP BY a.identifier
        ORDER BY points DESC`,
       [classIds]

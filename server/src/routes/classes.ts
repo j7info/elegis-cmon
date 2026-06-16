@@ -638,6 +638,27 @@ router.put('/:id/attendances/justify', authMiddleware, isCourseCreatorMiddleware
       [req.params.id, identifier, justification]
     );
 
+    // Auto-register the student in the course if not already registered
+    const { rows: classRows } = await pool.query('SELECT course_id FROM classes WHERE id = $1', [req.params.id]);
+    if (classRows.length > 0) {
+      const courseId = classRows[0].course_id;
+      
+      const { rows: userRows } = await pool.query(
+        'SELECT name, cargo, departamento FROM app_users WHERE matricula = $1 OR cpf = $1 OR email = $1',
+        [identifier]
+      );
+      
+      if (userRows.length > 0) {
+        const user = userRows[0];
+        await pool.query(
+          `INSERT INTO registrations (course_id, identifier, full_name, role, department)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (course_id, identifier) DO NOTHING`,
+          [courseId, identifier, user.name, user.cargo, user.departamento]
+        );
+      }
+    }
+
     res.json(att);
   } catch (err) {
     console.error('Justify attendance error:', err);

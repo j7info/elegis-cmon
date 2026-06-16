@@ -14,6 +14,12 @@ import clsx from 'clsx';
 interface Attendance {
   present: boolean;
   justification: number | null;
+  source?: 'online' | 'presential';
+  earned_points?: number;
+  max_points?: number;
+  percentage?: number;
+  total_time_spent_seconds?: number | null;
+  completed_at?: string | null;
 }
 
 interface Evaluation {
@@ -86,8 +92,14 @@ function ClassRow({ cl, defaultOpen }: { cl: ClassPerf; defaultOpen: boolean }) 
   const [open, setOpen] = useState(defaultOpen);
   const hasEvals = cl.evaluations.length > 0;
   const attLabel = cl.attendance
-    ? cl.attendance.present
-      ? 'Presente'
+    ? cl.attendance.source === 'online'
+      ? cl.attendance.present
+        ? `Slides concluídos (${cl.attendance.percentage ?? 100}%)`
+        : 'Em leitura'
+      : cl.attendance.present
+        ? cl.attendance.percentage != null
+          ? `Presente (${cl.attendance.percentage}%)`
+          : 'Presente'
       : cl.attendance.justification != null
         ? `Justificado (${cl.attendance.justification}%)`
         : 'Ausente'

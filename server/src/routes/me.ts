@@ -47,41 +47,107 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
 
     const courseIds = courses.map((c: any) => c.id);
 
-    // 3. Aulas com presença
+    // 3. Aulas com presença presencial ou progresso online do próprio aluno
     const { rows: classesRaw } = await pool.query(
       `SELECT
-         cl.id, cl.course_id, cl.title, cl.date,
+         cl.id, cl.course_id, cl.title, cl.date, cl.type,
          cl.points_start, cl.points_middle, cl.points_end,
-         CASE WHEN a.id IS NOT NULL THEN jsonb_build_object(
-           'present',
-           (a.scan_start IS NOT NULL OR a.scan_middle IS NOT NULL OR a.scan_end IS NOT NULL),
-           'justification', a.justification
-         ) ELSE NULL END AS att_data
+         CASE
+           WHEN cl.type = 'online' AND op.id IS NOT NULL THEN jsonb_build_object(
+             'source', 'online',
+             'present', op.completed_at IS NOT NULL,
+             'justification', CASE WHEN op.completed_at IS NOT NULL THEN 100 ELSE NULL END,
+             'completed_at', op.completed_at,
+             'total_time_spent_seconds', op.total_time_spent_seconds
+           )
+           WHEN cl.type <> 'online' AND a.id IS NOT NULL THEN jsonb_build_object(
+             'source', 'presential',
+             'present', (a.scan_start IS NOT NULL OR a.scan_middle IS NOT NULL OR a.scan_end IS NOT NULL),
+             'scan_start', a.scan_start,
+             'scan_middle', a.scan_middle,
+             'scan_end', a.scan_end,
+             'justification', a.justification
+           )
+           ELSE NULL
+         END AS att_data
        FROM classes cl
-       LEFT JOIN attendances a ON a.class_id = cl.id AND a.identifier = ANY($2::text[])
+       LEFT JOIN LATERAL (
+         SELECT *
+         FROM attendances
+         WHERE class_id = cl.id AND identifier = ANY($2::text[])
+         ORDER BY updated_at DESC NULLS LAST, created_at DESC
+         LIMIT 1
+       ) a ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT *
+         FROM class_online_progress
+         WHERE class_id = cl.id AND identifier = ANY($2::text[])
+         ORDER BY completed_at DESC NULLS LAST, created_at DESC
+         LIMIT 1
+       ) op ON TRUE
        WHERE cl.course_id = ANY($1::int[])
        ORDER BY cl.course_id, cl.date, cl.id`,
       [courseIds, ids]
     );
 
+    const classIds = classesRaw.map((cl: any) => cl.id);
+
     // 4. Notas das avaliações
     const { rows: evalScores } = await pool.query(
-      `SELECT
-         e.id AS evaluation_id,
-         e.class_id,
-         e.title AS evaluation_title,
-         COALESCE(SUM(CASE WHEN alt.is_correct THEN q.points ELSE 0 END), 0)::int AS total_score,
-         COALESCE(SUM(q.points), 0)::int AS total_possible,
-         ep.justification
-       FROM evaluation_participants ep
-       JOIN evaluations e ON e.id = ep.evaluation_id
-       LEFT JOIN student_answers sa ON sa.participant_id = ep.id
-       LEFT JOIN alternatives alt ON sa.alternative_id = alt.id
-       LEFT JOIN questions q ON sa.question_id = q.id
-       WHERE e.class_id = ANY($1::int[])
-       AND ep.identifier = ANY($2::text[])
-       GROUP BY e.id, e.class_id, e.title, ep.justification, ep.identifier`,
-      [courseIds, ids]
+      `WITH eval_totals AS (
+         SELECT evaluation_id, SUM(points)::int AS total_possible
+         FROM questions
+         GROUP BY evaluation_id
+       ),
+       legacy_scores AS (
+         SELECT
+           e.id AS evaluation_id,
+           e.class_id,
+           e.title AS evaluation_title,
+           COALESCE(SUM(CASE WHEN alt.is_correct THEN q.points ELSE 0 END), 0)::int AS total_score,
+           COALESCE(et.total_possible, 0)::int AS total_possible,
+           ep.justification,
+           NULL::int AS percentage,
+           ROW_NUMBER() OVER (
+             PARTITION BY e.id
+             ORDER BY COALESCE(SUM(CASE WHEN alt.is_correct THEN q.points ELSE 0 END), 0) DESC, ep.id DESC
+           ) AS rn
+         FROM evaluation_participants ep
+         JOIN evaluations e ON e.id = ep.evaluation_id
+         LEFT JOIN eval_totals et ON et.evaluation_id = e.id
+         LEFT JOIN student_answers sa ON sa.participant_id = ep.id
+         LEFT JOIN alternatives alt ON sa.alternative_id = alt.id
+         LEFT JOIN questions q ON sa.question_id = q.id
+         WHERE e.class_id = ANY($1::int[])
+           AND e.type <> 'online'
+           AND ep.identifier = ANY($2::text[])
+         GROUP BY e.id, e.class_id, e.title, ep.justification, ep.identifier, ep.id, et.total_possible
+       ),
+       online_scores AS (
+         SELECT
+           e.id AS evaluation_id,
+           e.class_id,
+           e.title AS evaluation_title,
+           oat.total_score::int AS total_score,
+           oat.total_possible::int AS total_possible,
+           ep.justification,
+           oat.percentage::int AS percentage,
+           ROW_NUMBER() OVER (
+             PARTITION BY e.id
+             ORDER BY oat.percentage DESC, oat.total_score DESC, oat.completed_at DESC
+           ) AS rn
+         FROM online_evaluation_attempts oat
+         JOIN evaluation_participants ep ON ep.id = oat.participant_id
+         JOIN evaluations e ON e.id = oat.evaluation_id
+         WHERE e.class_id = ANY($1::int[])
+           AND e.type = 'online'
+           AND oat.status = 'completed'
+           AND ep.identifier = ANY($2::text[])
+       )
+       SELECT * FROM legacy_scores WHERE rn = 1
+       UNION ALL
+       SELECT * FROM online_scores WHERE rn = 1`,
+      [classIds, ids]
     );
 
     // 5. Montar resposta
@@ -112,8 +178,6 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
         const present = att?.present === true;
         const justVal: number | null = att?.justification ?? null;
 
-        if (present) attendedClasses++;
-
         const ptsStart = cl.points_start ?? 40;
         const ptsMiddle = cl.points_middle ?? 30;
         const ptsEnd = cl.points_end ?? 30;
@@ -123,9 +187,14 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
         let earned = 0;
         if (justVal != null) {
           earned = Math.round((classTotalPts * justVal) / 100);
-        } else if (present) {
-          earned = classTotalPts;
+        } else if (cl.type === 'online') {
+          earned = present ? classTotalPts : 0;
+        } else if (att) {
+          if (att.scan_start != null && Number(att.scan_start) > 0) earned += ptsStart;
+          if (att.scan_middle != null && Number(att.scan_middle) > 0) earned += ptsMiddle;
+          if (att.scan_end != null && Number(att.scan_end) > 0) earned += ptsEnd;
         }
+        if (earned > 0) attendedClasses++;
         totalEarnedPoints += earned;
 
         // Avaliações desta aula
@@ -156,7 +225,16 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
           date: cl.date,
           order_index: cl.order_index,
           attendance: att
-            ? { present, justification: justVal }
+            ? {
+                present,
+                justification: justVal,
+                source: att.source,
+                earned_points: earned,
+                max_points: classTotalPts,
+                percentage: classTotalPts > 0 ? Math.round((earned / classTotalPts) * 100) : 0,
+                total_time_spent_seconds: att.total_time_spent_seconds ?? null,
+                completed_at: att.completed_at ?? null,
+              }
             : null,
           evaluation_count: evaluations.length,
           evaluations,

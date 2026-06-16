@@ -28,6 +28,16 @@ export function ClassDetail() {
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  // Modal state for manual justification
+  const [showJustifyModal, setShowJustifyModal] = useState(false);
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [justificationPercent, setJustificationPercent] = useState<string>('0');
+  // Modal state for manual student registration
+  const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [newStudentId, setNewStudentId] = useState<string>('');
+  const [newStudentName, setNewStudentName] = useState<string>('');
+  const [newStudentRole, setNewStudentRole] = useState<string>('student');
+  const [newStudentDept, setNewStudentDept] = useState<string>('');
   const [editAuxTeacherId, setEditAuxTeacherId] = useState('');
   const [editingDuration, setEditingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('10');
@@ -608,6 +618,21 @@ export function ClassDetail() {
             {linkCopied ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />} 
             Link Cadastro
           </button>
+          {classData.status === 'completed' && (
+            <button onClick={async () => {
+              if (allUsers.length === 0) {
+                try {
+                  const usersData = await api.get('/users');
+                  setAllUsers(usersData);
+                } catch (err) {
+                  console.error('Failed to load users for justification', err);
+                }
+              }
+              setShowJustifyModal(true);
+            }} className="px-4 py-2 bg-teal-100 hover:bg-teal-200 text-teal-800 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Justificar Presença
+            </button>
+          )}
           
           {classData.status === 'scheduled' && (
             <button onClick={() => updateClass({ status: 'active' })} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
@@ -650,6 +675,76 @@ export function ClassDetail() {
         </div>
       </div>
 
+        {/* Justification Modal */}
+        {showJustifyModal && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Justificar Presença</h3>
+                <button onClick={() => setShowJustifyModal(false)} className="p-1 hover:bg-gray-100 rounded-full">
+                  <X className="w-5 h-5 text-gray-600" />
+                </button>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Aluno</label>
+                <select
+                  value={selectedStudentId}
+                  onChange={e => setSelectedStudentId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                >
+                  <option value="">Selecione um aluno</option>
+                  {allUsers
+                    .filter(u => u.system_role === 'ALUNO')
+                    .map(user => (
+                      <option key={user.matricula} value={user.matricula}>
+                        {user.name} ({maskIdentifier(user.matricula)})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">% de Presença</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={justificationPercent}
+                  onChange={e => setJustificationPercent(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  placeholder="0-100"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <button
+                  onClick={() => setShowJustifyModal(false)}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!selectedStudentId) {
+                      alert('Selecione um aluno.');
+                      return;
+                    }
+                    const perc = parseInt(justificationPercent, 10);
+                    if (isNaN(perc) || perc < 0 || perc > 100) {
+                      alert('Informe um percentual válido (0-100).');
+                      return;
+                    }
+                    await handleJustifyAttendance(selectedStudentId, perc);
+                    setShowJustifyModal(false);
+                    setSelectedStudentId('');
+                    setJustificationPercent('0');
+                  }}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       {classData.status === 'scheduled' && classData.type !== 'online' && (
         <div className="bg-teal-50 border border-teal-100 p-6 rounded-xl text-teal-800 flex flex-col items-center justify-center text-center">
           <LinkIcon className="w-10 h-10 text-teal-400 mb-3" />

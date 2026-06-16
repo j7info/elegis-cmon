@@ -136,6 +136,7 @@ export function ClassDetail() {
   const pMiddle = classData.points_middle ?? 30;
   const pEnd = classData.points_end ?? 30;
   const pTotal = pStart + pMiddle + pEnd;
+  const isOnlineClass = classData.type === 'online';
   const calcPoints = (att: any) => {
     if (att?.justification != null) {
       return Math.round((pStart + pMiddle + pEnd) * att.justification / 100);
@@ -152,6 +153,12 @@ export function ClassDetail() {
     attendances.find(a => normalizeMatchKey(a.identifier) === normalizeMatchKey(identifier));
   const findEvaluationScore = (identifier: string) =>
     evalScores.find(s => normalizeMatchKey(s.identifier) === normalizeMatchKey(identifier));
+  const formatDuration = (seconds: number | string | undefined | null) => {
+    const totalSeconds = Number(seconds) || 0;
+    const minutes = Math.floor(totalSeconds / 60);
+    const remainingSeconds = totalSeconds % 60;
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+  };
 
   const updateClass = async (updates: any) => {
     try {
@@ -757,8 +764,10 @@ export function ClassDetail() {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
-            <Users className="w-5 h-5 text-teal-600" />
-            Cadastros & Presenças ({attendances.length} de {registrations.length})
+            {isOnlineClass ? <BookOpen className="w-5 h-5 text-teal-600" /> : <Users className="w-5 h-5 text-teal-600" />}
+            {isOnlineClass
+              ? `Acessos, Leituras & Avaliações (${attendances.filter(a => a.completed_at).length} concluída${attendances.filter(a => a.completed_at).length === 1 ? '' : 's'} de ${registrations.length})`
+              : `Cadastros & Presenças (${attendances.length} de ${registrations.length})`}
           </h2>
         </div>
         
@@ -768,12 +777,12 @@ export function ClassDetail() {
               <tr>
                 <th className="px-4 py-3 text-gray-700">Nome</th>
                 <th className="px-4 py-3 text-gray-700">Identificação</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Início ({pStart})</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Meio ({pMiddle})</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Fim ({pEnd})</th>
-                <th className="px-4 py-3 text-gray-700 text-center font-bold">Total</th>
+                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Acesso' : `Início (${pStart})`}</th>
+                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Slides' : `Meio (${pMiddle})`}</th>
+                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Tempo' : `Fim (${pEnd})`}</th>
+                <th className="px-4 py-3 text-gray-700 text-center font-bold">{isOnlineClass ? 'Presença' : 'Total'}</th>
                 <th className="px-4 py-3 text-gray-700 text-center">Avaliação</th>
-                <th className="px-4 py-3 text-gray-700 text-center">Justificativa</th>
+                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Situação' : 'Justificativa'}</th>
               </tr>
             </thead>
             <tbody>
@@ -788,13 +797,19 @@ export function ClassDetail() {
                       <td className="px-4 py-3 font-medium text-gray-900">{reg.full_name}</td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-400">{maskIdentifier(reg.identifier)}</td>
                       <td className="px-4 py-3 text-center text-xs">
-                        {att?.scan_start ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
+                        {isOnlineClass
+                          ? (att ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)
+                          : (att?.scan_start ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)}
                       </td>
                       <td className="px-4 py-3 text-center text-xs">
-                        {att?.scan_middle ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
+                        {isOnlineClass
+                          ? (att?.completed_at ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)
+                          : (att?.scan_middle ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)}
                       </td>
                       <td className="px-4 py-3 text-center text-xs">
-                        {att?.scan_end ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
+                        {isOnlineClass && att
+                          ? <span className="font-medium text-gray-500">{formatDuration(att.total_time_spent_seconds)}</span>
+                          : att?.scan_end ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
                       </td>
                       <td className="px-4 py-3 text-center font-bold text-teal-600">{p}</td>
                       <td className="px-4 py-3 text-center">
@@ -810,10 +825,16 @@ export function ClassDetail() {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {att?.source === 'online' && att?.completed_at ? (
+                        {isOnlineClass && att?.completed_at ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
                             <BookOpen className="w-3 h-3" /> Slides concluídos
                           </span>
+                        ) : isOnlineClass && att ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                            <Clock className="w-3 h-3" /> Em leitura
+                          </span>
+                        ) : isOnlineClass ? (
+                          <span className="text-gray-300">Aguardando</span>
                         ) : att?.justification != null ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
                             <Award className="w-3 h-3" /> {att.justification}%

@@ -77,15 +77,26 @@ async function getEvaluationScoresByClass(classIds: number[]): Promise<Map<strin
   const { rows: onlineScores } = await pool.query(
     `WITH ranked AS (
        SELECT
-         ep.identifier,
+         COALESCE(r.identifier, ep.identifier) AS identifier,
          oat.evaluation_id,
          oat.percentage,
          ROW_NUMBER() OVER (
-           PARTITION BY oat.evaluation_id, ep.identifier
+           PARTITION BY oat.evaluation_id, COALESCE(r.identifier, ep.identifier)
            ORDER BY oat.percentage DESC, oat.total_score DESC, oat.completed_at DESC
          ) AS rn
        FROM online_evaluation_attempts oat
        JOIN evaluation_participants ep ON ep.id = oat.participant_id
+       JOIN evaluations e ON e.id = oat.evaluation_id
+       JOIN classes c ON c.id = e.class_id
+       LEFT JOIN app_users u
+         ON ep.identifier = u.cpf OR ep.identifier = u.email
+       LEFT JOIN registrations r
+         ON r.course_id = c.course_id
+        AND (
+          r.identifier = ep.identifier
+          OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
+          OR (u.email IS NOT NULL AND r.identifier = u.email)
+        )
        WHERE oat.evaluation_id = ANY($1::int[])
          AND oat.status = 'completed'
      )
@@ -136,11 +147,55 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
 
     // Aggregate attendance across all classes usando os pesos de cada aula
     const { rows } = await pool.query(
-      `SELECT
+      `WITH online_attendances AS (
+        SELECT DISTINCT ON (p.id)
+          p.class_id,
+          COALESCE(r.identifier, p.identifier) AS identifier,
+          COALESCE(r.full_name, p.full_name) AS full_name,
+          r.department,
+          r.role,
+          CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_start,
+          CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_middle,
+          CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_end,
+          CASE WHEN p.completed_at IS NOT NULL THEN 100 ELSE NULL END AS justification
+        FROM class_online_progress p
+        JOIN classes oc ON oc.id = p.class_id
+        LEFT JOIN app_users u
+          ON p.identifier = u.cpf OR p.identifier = u.email
+        LEFT JOIN registrations r
+          ON r.course_id = oc.course_id
+         AND (
+           r.identifier = p.identifier
+           OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
+           OR (u.email IS NOT NULL AND r.identifier = u.email)
+         )
+        WHERE p.class_id = ANY($1)
+          AND oc.type = 'online'
+        ORDER BY p.id, CASE WHEN r.id IS NULL THEN 1 ELSE 0 END, r.created_at DESC
+      ),
+      all_attendances AS (
+        SELECT
+          a.class_id,
+          a.identifier,
+          a.full_name,
+          a.department,
+          a.role,
+          a.scan_start,
+          a.scan_middle,
+          a.scan_end,
+          a.justification
+        FROM attendances a
+        WHERE a.class_id = ANY($1)
+
+        UNION ALL
+
+        SELECT * FROM online_attendances
+      )
+      SELECT
         a.identifier,
-        a.full_name,
-        a.department,
-        a.role,
+        MAX(a.full_name) AS full_name,
+        MAX(a.department) AS department,
+        MAX(a.role) AS role,
         SUM(
           CASE
             WHEN a.justification IS NOT NULL
@@ -151,10 +206,9 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
               CASE WHEN a.scan_end    IS NOT NULL THEN c.points_end    ELSE 0 END
           END
         ) AS points
-       FROM attendances a
+       FROM all_attendances a
        JOIN classes c ON a.class_id = c.id
-       WHERE a.class_id = ANY($1)
-       GROUP BY a.identifier, a.full_name, a.department, a.role
+       GROUP BY a.identifier
        ORDER BY points DESC`,
       [classIds]
     );

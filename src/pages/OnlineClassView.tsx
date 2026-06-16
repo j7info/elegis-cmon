@@ -248,7 +248,7 @@ export function OnlineClassView() {
   }, [step, onlineEvalState, refreshEvaluationState]);
 
   // Start evaluation
-  const handleStartEvaluation = async () => {
+  const handleStartEvaluation = async (forceNewAttempt = false) => {
     if (!classId) return;
     setEvalError(null);
     setEvalSubmitting(true);
@@ -256,6 +256,7 @@ export function OnlineClassView() {
       const onlineEval = await api.get(`/classes/${classId}/online/evaluation`);
       const startRes = await api.post(`/evaluations/${onlineEval.id}/online/start`, {
         identifier: identifier.trim(),
+        force_new_attempt: forceNewAttempt,
       });
       setLoadEvalId(onlineEval.id);
       setOnlineEvalState(startRes);
@@ -451,7 +452,7 @@ export function OnlineClassView() {
                   </div>
                 )}
                 <button
-                  onClick={handleStartEvaluation}
+                  onClick={() => handleStartEvaluation()}
                   className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
                 >
                   <HelpCircle className="w-5 h-5" /> Iniciar Avaliação
@@ -514,7 +515,7 @@ export function OnlineClassView() {
                 </p>
                 {attemptsRemaining > 0 && (
                   <button
-                    onClick={handleStartEvaluation}
+                    onClick={() => handleStartEvaluation(true)}
                     disabled={evalSubmitting}
                     className="mt-6 px-6 py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-bold transition-colors"
                   >

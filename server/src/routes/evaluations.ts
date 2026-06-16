@@ -970,7 +970,7 @@ router.put('/evaluations/:evaluationId/participants/:participantId/justify', aut
 // POST /api/evaluations/:id/online/start — Aluno inicia ou retoma uma tentativa online
 router.post('/evaluations/:id/online/start', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { identifier } = req.body;
+  const { identifier, force_new_attempt } = req.body;
 
   if (!identifier?.trim()) {
     res.status(400).json({ error: 'Identificador é obrigatório' });
@@ -1049,7 +1049,7 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
     const activeAttempt = existingAttempts.find((a: any) => a.status === 'in_progress');
     const completedCount = existingAttempts.filter((a: any) => a.status === 'completed').length;
 
-    if (!activeAttempt && completedCount < 3) {
+    if (!activeAttempt && completedCount < 3 && (completedCount === 0 || force_new_attempt === true)) {
       const maxAttemptNumber = existingAttempts.reduce(
         (max: number, attempt: any) => Math.max(max, parseInt(attempt.attempt_number) || 0),
         0

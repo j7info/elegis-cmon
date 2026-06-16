@@ -147,6 +147,12 @@ export function ClassDetail() {
     return p;
   };
 
+  const normalizeMatchKey = (value: any) => String(value || '').trim().toLowerCase();
+  const findAttendance = (identifier: string) =>
+    attendances.find(a => normalizeMatchKey(a.identifier) === normalizeMatchKey(identifier));
+  const findEvaluationScore = (identifier: string) =>
+    evalScores.find(s => normalizeMatchKey(s.identifier) === normalizeMatchKey(identifier));
+
   const updateClass = async (updates: any) => {
     try {
       const updated = await api.put(`/classes/${classId}`, updates);
@@ -281,7 +287,7 @@ export function ClassDetail() {
     };
 
     const rows = registrations.map(reg => {
-      const att = attendances.find(a => a.identifier === reg.identifier);
+      const att = findAttendance(reg.identifier);
       return [
         escapeCsv(reg.full_name),
         escapeCsv(reg.identifier),
@@ -317,8 +323,8 @@ export function ClassDetail() {
     };
 
     const bodyRows = registrations.map(reg => {
-      const att = attendances.find(a => a.identifier === reg.identifier);
-      const es = evalScores.find(s => s.identifier === reg.identifier);
+      const att = findAttendance(reg.identifier);
+      const es = findEvaluationScore(reg.identifier);
       const evalPts = es ? `${es.total_score}/${es.total_possible}` : '—';
       return `<tr>
         <td>${esc(reg.full_name)}</td>
@@ -521,7 +527,7 @@ export function ClassDetail() {
   };
 
   const chartData = registrations.map(reg => {
-    const att = attendances.find(a => a.identifier === reg.identifier);
+    const att = findAttendance(reg.identifier);
     return { name: reg.full_name || reg.identifier, points: calcPoints(att) };
   }).sort((a, b) => b.points - a.points);
 
@@ -775,7 +781,7 @@ export function ClassDetail() {
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
               ) : (
                 registrations.map(reg => {
-                  const att = attendances.find(a => a.identifier === reg.identifier);
+                  const att = findAttendance(reg.identifier);
                   const p = calcPoints(att);
                   return (
                     <tr key={reg.identifier} className="border-b border-gray-50 hover:bg-gray-50/50">
@@ -793,7 +799,7 @@ export function ClassDetail() {
                       <td className="px-4 py-3 text-center font-bold text-teal-600">{p}</td>
                       <td className="px-4 py-3 text-center">
                         {(() => {
-                          const es = evalScores.find(s => s.identifier === reg.identifier);
+                          const es = findEvaluationScore(reg.identifier);
                           if (es) {
                             const pts = parseInt(es.total_score);
                             const maxPts = parseInt(es.total_possible);
@@ -804,7 +810,11 @@ export function ClassDetail() {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {att?.justification != null ? (
+                        {att?.source === 'online' && att?.completed_at ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
+                            <BookOpen className="w-3 h-3" /> Slides concluídos
+                          </span>
+                        ) : att?.justification != null ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
                             <Award className="w-3 h-3" /> {att.justification}%
                           </span>

@@ -452,6 +452,49 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
       return;
     }
 
+    const { rows: [classRow] } = await pool.query(
+      'SELECT id, course_id, type FROM classes WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (classRow?.type === 'online') {
+      const { rows } = await pool.query(
+        `WITH matched_progress AS (
+           SELECT DISTINCT ON (p.id)
+             p.id,
+             p.class_id,
+             COALESCE(r.identifier, p.identifier) AS identifier,
+             COALESCE(r.full_name, p.full_name) AS full_name,
+             r.role,
+             r.department,
+             CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_start,
+             CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_middle,
+             CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_end,
+             CASE WHEN p.completed_at IS NOT NULL THEN 100 ELSE NULL END AS justification,
+             p.created_at,
+             p.completed_at,
+             p.total_time_spent_seconds,
+             'online' AS source
+           FROM class_online_progress p
+           LEFT JOIN app_users u
+             ON p.identifier = u.cpf OR p.identifier = u.email
+           LEFT JOIN registrations r
+             ON r.course_id = $2
+            AND (
+              r.identifier = p.identifier
+              OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
+              OR (u.email IS NOT NULL AND r.identifier = u.email)
+            )
+           WHERE p.class_id = $1
+           ORDER BY p.id, CASE WHEN r.id IS NULL THEN 1 ELSE 0 END, r.created_at DESC
+         )
+         SELECT * FROM matched_progress ORDER BY created_at DESC`,
+        [req.params.id, classRow.course_id]
+      );
+      res.json(rows);
+      return;
+    }
+
     const { rows } = await pool.query(
       'SELECT * FROM attendances WHERE class_id = $1 ORDER BY created_at DESC',
       [req.params.id]
@@ -466,6 +509,16 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
 // GET /api/classes/:id/evaluation-scores — Pontuação de avaliações por aluno nesta aula
 router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
   try {
+    const { rows: [classRow] } = await pool.query(
+      'SELECT id, course_id FROM classes WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (!classRow) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
     const { rows: evaluations } = await pool.query(
       'SELECT id FROM evaluations WHERE class_id = $1',
       [req.params.id]
@@ -526,22 +579,31 @@ router.get('/:id/evaluation-scores', async (req: Request, res: Response) => {
     const { rows: onlineScores } = await pool.query(
       `WITH ranked AS (
          SELECT
-           ep.identifier,
-           ep.name,
+           COALESCE(r.identifier, ep.identifier) AS identifier,
+           COALESCE(r.full_name, ep.name) AS name,
            oat.evaluation_id,
            oat.total_score,
            oat.total_possible,
            ROW_NUMBER() OVER (
-             PARTITION BY oat.evaluation_id, ep.identifier
+             PARTITION BY oat.evaluation_id, COALESCE(r.identifier, ep.identifier)
              ORDER BY oat.percentage DESC, oat.total_score DESC, oat.completed_at DESC
            ) AS rn
          FROM online_evaluation_attempts oat
          JOIN evaluation_participants ep ON ep.id = oat.participant_id
+         LEFT JOIN app_users u
+           ON ep.identifier = u.cpf OR ep.identifier = u.email
+         LEFT JOIN registrations r
+           ON r.course_id = $2
+          AND (
+            r.identifier = ep.identifier
+            OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
+            OR (u.email IS NOT NULL AND r.identifier = u.email)
+          )
          WHERE oat.evaluation_id = ANY($1::int[])
            AND oat.status = 'completed'
        )
        SELECT * FROM ranked WHERE rn = 1`,
-      [evalIds]
+      [evalIds, classRow.course_id]
     );
 
     for (const r of onlineScores) {

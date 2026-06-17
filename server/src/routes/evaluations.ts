@@ -597,7 +597,6 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
     );
 
     let currentQuestionWithAlts = null;
-    let currentQuestionWithAlts = null;
     let resultData = null;
     let allResults: any[] | null = null;
     let participantAnswers: any[] = [];

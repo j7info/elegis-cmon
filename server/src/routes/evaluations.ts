@@ -645,10 +645,14 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
 
         allResults.push({
           question: { id: q.id, text: q.text, order_index: q.order_index, points: q.points },
-          alternatives_stats: qAlts.map((alt: any) => ({
-            ...alt,
-            count: answers.filter((a: any) => a.alternative_id === alt.id).length,
-          })),
+          alternatives_stats: qAlts.map((alt: any) => {
+            const altAnswers = answers.filter((a: any) => a.alternative_id === alt.id);
+            return {
+              ...alt,
+              count: altAnswers.length,
+              participants: altAnswers.map((a: any) => ({ name: a.participant_name, identifier: a.participant_identifier })),
+            };
+          }),
           correct_alternative_id: correctAlt?.id || null,
           correct_count: answers.filter((a: any) => a.alternative_id === correctAlt?.id).length,
           total_answers: answers.length,
@@ -686,10 +690,14 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
           );
           const correctCount = answers.filter((a: any) => a.alternative_id === correctAlt?.id).length;
 
-          const altStats = currentQuestionWithAlts.alternatives.map((alt: any) => ({
-            ...alt,
-            count: answers.filter((a: any) => a.alternative_id === alt.id).length,
-          }));
+          const altStats = currentQuestionWithAlts.alternatives.map((alt: any) => {
+            const altAnswers = answers.filter((a: any) => a.alternative_id === alt.id);
+            return {
+              ...alt,
+              count: altAnswers.length,
+              participants: altAnswers.map((a: any) => ({ name: a.participant_name, identifier: a.participant_identifier })),
+            };
+          });
 
           const correctParticipants = answers
             .filter((a: any) => a.alternative_id === correctAlt?.id)
@@ -721,10 +729,14 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
 
           allResults.push({
             question: { id: q.id, text: q.text, order_index: q.order_index, points: q.points },
-            alternatives_stats: qAlts.map((alt: any) => ({
-              ...alt,
-              count: answers.filter((a: any) => a.alternative_id === alt.id).length,
-            })),
+            alternatives_stats: qAlts.map((alt: any) => {
+              const altAnswers = answers.filter((a: any) => a.alternative_id === alt.id);
+              return {
+                ...alt,
+                count: altAnswers.length,
+                participants: altAnswers.map((a: any) => ({ name: a.participant_name, identifier: a.participant_identifier })),
+              };
+            }),
             correct_alternative_id: correctAlt?.id || null,
             correct_count: answers.filter((a: any) => a.alternative_id === correctAlt?.id).length,
             total_answers: answers.length,

@@ -270,6 +270,18 @@ export function EvaluationSession() {
                           {alt.count} ({pct}%)
                         </span>
                       </div>
+                      {alt.participants && alt.participants.length > 0 && (
+                        <div className="relative px-6 pb-4 pt-1 flex flex-wrap gap-1.5">
+                          {alt.participants.map((p: any, i: number) => (
+                            <span key={i} className={clsx(
+                              "text-[11px] font-medium px-2 py-0.5 rounded border",
+                              isCorrect ? "bg-green-100/80 border-green-200 text-green-800" : "bg-white/80 border-gray-200 text-gray-600"
+                            )}>
+                              {p.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -333,6 +345,18 @@ export function EvaluationSession() {
                           </span>
                           <span className="font-bold text-sm">{alt.count} ({pct}%)</span>
                         </div>
+                        {alt.participants && alt.participants.length > 0 && (
+                          <div className="relative px-4 pb-3 pt-0 flex flex-wrap gap-1.5">
+                            {alt.participants.map((p: any, i: number) => (
+                              <span key={i} className={clsx(
+                                "text-[11px] font-medium px-2 py-0.5 rounded border",
+                                isCorrect ? "bg-green-100/80 border-green-200 text-green-800" : "bg-white/80 border-gray-200 text-gray-600"
+                              )}>
+                                {p.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

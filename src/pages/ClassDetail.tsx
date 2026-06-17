@@ -8,6 +8,7 @@ import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, F
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { AttemptDetailsModal } from '../components/AttemptDetailsModal';
 import { maskIdentifier } from '../lib/format';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -58,6 +59,8 @@ export function ClassDetail() {
   const [evaluations, setEvaluations] = useState<any[]>([]);
   const [showCreateEval, setShowCreateEval] = useState(false);
   const [editingEvalId, setEditingEvalId] = useState<number | null>(null);
+  const [selectedAttemptEvalId, setSelectedAttemptEvalId] = useState<number | null>(null);
+  const [selectedAttemptStudentId, setSelectedAttemptStudentId] = useState<string | null>(null);
   const [evalTitle, setEvalTitle] = useState('');
   const [evalQuestionTime, setEvalQuestionTime] = useState('30');
   const [evalQuestions, setEvalQuestions] = useState<any[]>([{ text: '', points: 10, alternatives: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }] }]);
@@ -914,7 +917,24 @@ export function ClassDetail() {
                             const pts = parseInt(es.total_score);
                             const maxPts = parseInt(es.total_possible);
                             const pct = maxPts > 0 ? Math.round((pts / maxPts) * 100) : 0;
-                            return <span className={clsx("text-xs font-bold", pts > 0 ? "text-teal-600" : "text-gray-400")}>{pts}/{maxPts} ({pct}%)</span>;
+                            const evalId = evaluations.find((e: any) => e.type === 'online')?.id;
+                            return (
+                              <div className="flex items-center justify-center gap-2">
+                                <span className={clsx("text-xs font-bold", pts > 0 ? "text-teal-600" : "text-gray-400")}>{pts}/{maxPts} ({pct}%)</span>
+                                {isOnlineClass && evalId && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAttemptEvalId(evalId);
+                                      setSelectedAttemptStudentId(reg.identifier);
+                                    }}
+                                    className="p-1 text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded"
+                                    title="Ver detalhes da tentativa"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
                           }
                           return <span className="text-gray-300">-</span>;
                         })()}
@@ -1384,6 +1404,17 @@ export function ClassDetail() {
             </form>
           </div>
         </div>
+      )}
+
+      {selectedAttemptEvalId && selectedAttemptStudentId && (
+        <AttemptDetailsModal
+          evaluationId={selectedAttemptEvalId}
+          identifier={selectedAttemptStudentId}
+          onClose={() => {
+            setSelectedAttemptEvalId(null);
+            setSelectedAttemptStudentId(null);
+          }}
+        />
       )}
     </div>
   );

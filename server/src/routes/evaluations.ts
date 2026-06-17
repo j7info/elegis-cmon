@@ -1392,4 +1392,127 @@ router.post('/evaluations/:id/online/submit', async (req: Request, res: Response
   }
 });
 
+// GET /api/evaluations/:id/online/attempts/:identifier/best — Detalhes da melhor tentativa do aluno
+router.get('/evaluations/:id/online/attempts/:identifier/best', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { id, identifier } = req.params;
+
+  if (!identifier?.trim()) {
+    res.status(400).json({ error: 'Identificador é obrigatório' });
+    return;
+  }
+
+  const cleanIdentifier = normalizeIdentifier(identifier);
+  const client = await pool.connect();
+
+  try {
+    // 1. Verifica permissões: O usuário logado é o dono do identifier OU é admin/professor com acesso à avaliação?
+    const { rows: userRows } = await client.query('SELECT cpf, email, matricula FROM app_users WHERE id = $1', [req.user!.id]);
+    const loggedUser = userRows[0];
+    const userIds = [loggedUser?.cpf, loggedUser?.email, loggedUser?.matricula].map(v => v ? normalizeIdentifier(v) : null).filter(Boolean);
+    
+    const isSelf = userIds.includes(cleanIdentifier);
+    let canAccess = isSelf;
+
+    if (!isSelf) {
+       canAccess = await userCanAccessEvaluation(id, req.user!.id, req.user!.system_role);
+    }
+
+    if (!canAccess) {
+      res.status(403).json({ error: 'Sem permissão para visualizar esta tentativa' });
+      client.release();
+      return;
+    }
+
+    // 2. Busca o participante
+    const { rows: participants } = await client.query(
+      `SELECT ep.* FROM evaluation_participants ep
+       WHERE ep.evaluation_id = $1 AND ep.identifier = $2`,
+      [id, cleanIdentifier]
+    );
+
+    if (participants.length === 0) {
+      res.status(404).json({ error: 'Participante não encontrado' });
+      client.release();
+      return;
+    }
+    const participant = participants[0];
+
+    // 3. Busca a melhor tentativa concluída
+    const { rows: attempts } = await client.query(
+      `SELECT * FROM online_evaluation_attempts
+       WHERE evaluation_id = $1 AND participant_id = $2 AND status = 'completed'
+       ORDER BY percentage DESC, total_score DESC, completed_at DESC
+       LIMIT 1`,
+      [id, participant.id]
+    );
+
+    if (attempts.length === 0) {
+      res.status(404).json({ error: 'Nenhuma tentativa concluída encontrada' });
+      client.release();
+      return;
+    }
+    const bestAttempt = attempts[0];
+
+    // 4. Busca a avaliação
+    const { rows: [evaluation] } = await client.query('SELECT id, title FROM evaluations WHERE id = $1', [id]);
+
+    // 5. Busca as perguntas e alternativas
+    const questions = await getOnlineQuestions(client, id);
+    const questionIds = questions.map((q: any) => q.id);
+
+    // Identifica as alternativas corretas
+    let correctAlternatives = [];
+    if (questionIds.length > 0) {
+       const { rows: correctAlts } = await client.query(
+         `SELECT question_id, id FROM alternatives WHERE question_id = ANY($1::int[]) AND is_correct = TRUE`,
+         [questionIds]
+       );
+       correctAlternatives = correctAlts;
+    }
+
+    // 6. Busca as respostas do aluno nesta tentativa
+    const { rows: answers } = await client.query(
+      `SELECT question_id, alternative_id, is_correct, points_awarded
+       FROM online_evaluation_attempt_answers
+       WHERE attempt_id = $1`,
+      [bestAttempt.id]
+    );
+
+    // Mapeia e junta tudo
+    const detailedQuestions = questions.map((q: any) => {
+      const studentAnswer = answers.find((a: any) => a.question_id === q.id);
+      const correctAlt = correctAlternatives.find((ca: any) => ca.question_id === q.id);
+      
+      return {
+        ...q,
+        correct_alternative_id: correctAlt ? correctAlt.id : null,
+        student_answer: studentAnswer ? {
+          alternative_id: studentAnswer.alternative_id,
+          is_correct: studentAnswer.is_correct,
+          points_awarded: studentAnswer.points_awarded
+        } : null
+      };
+    });
+
+    res.json({
+      evaluation,
+      attempt: {
+        id: bestAttempt.id,
+        attempt_number: bestAttempt.attempt_number,
+        total_score: bestAttempt.total_score,
+        total_possible: bestAttempt.total_possible,
+        percentage: bestAttempt.percentage,
+        completed_at: bestAttempt.completed_at
+      },
+      questions: detailedQuestions
+    });
+
+  } catch (err) {
+    console.error('Online attempt details error:', err);
+    res.status(500).json({ error: 'Erro ao buscar detalhes da tentativa' });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;

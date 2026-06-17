@@ -7,9 +7,10 @@ import { ptBR } from 'date-fns/locale';
 import {
   ChevronDown, ChevronRight, CheckCircle2, XCircle, AlertCircle,
   BarChart, BookOpen, Award, Clock, GraduationCap, FileText,
-  HelpCircle,
+  HelpCircle, Eye
 } from 'lucide-react';
 import clsx from 'clsx';
+import { AttemptDetailsModal } from '../components/AttemptDetailsModal';
 
 interface Attendance {
   present: boolean;
@@ -35,6 +36,7 @@ interface ClassPerf {
   id: number;
   title: string;
   date: string;
+  type?: 'online' | 'presential';
   order_index?: number;
   attendance: Attendance | null;
   evaluation_count: number;
@@ -88,7 +90,7 @@ function AttendanceIcon({ att }: { att: Attendance | null }) {
   return <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" title="Ausente" />;
 }
 
-function ClassRow({ cl, defaultOpen }: { cl: ClassPerf; defaultOpen: boolean }) {
+function ClassRow({ cl, defaultOpen, onOpenDetails }: { cl: ClassPerf; defaultOpen: boolean; onOpenDetails: (evalId: number) => void }) {
   const [open, setOpen] = useState(defaultOpen);
   const hasEvals = cl.evaluations.length > 0;
   const attLabel = cl.attendance
@@ -159,6 +161,15 @@ function ClassRow({ cl, defaultOpen }: { cl: ClassPerf; defaultOpen: boolean }) 
                       Justif. {ev.justification}%
                     </span>
                   )}
+                  {cl.type === 'online' && (
+                    <button
+                      onClick={() => onOpenDetails(ev.evaluation_id)}
+                      className="ml-2 text-teal-600 hover:text-teal-700 hover:bg-teal-50 p-1 rounded transition-colors"
+                      title="Ver detalhes da tentativa"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -175,7 +186,7 @@ function ClassRow({ cl, defaultOpen }: { cl: ClassPerf; defaultOpen: boolean }) 
   );
 }
 
-function CourseCard({ course }: { course: CoursePerf }) {
+function CourseCard({ course, onOpenDetails }: { course: CoursePerf; onOpenDetails: (evalId: number) => void }) {
   const [expanded, setExpanded] = useState(false);
   const { overall } = course;
   const attPct = overall.attendance_percentage;
@@ -292,7 +303,7 @@ function CourseCard({ course }: { course: CoursePerf }) {
       {expanded && (
         <div className="px-5 pb-5 pt-3 space-y-2">
           {course.classes.map((cl, idx) => (
-            <ClassRow key={cl.id} cl={cl} defaultOpen={cl.evaluation_count > 0 && idx === course.classes.length - 1} />
+            <ClassRow key={cl.id} cl={cl} defaultOpen={cl.evaluation_count > 0 && idx === course.classes.length - 1} onOpenDetails={onOpenDetails} />
           ))}
           {course.classes.length === 0 && (
             <p className="text-sm text-gray-400 italic text-center py-4">Nenhuma aula cadastrada neste curso</p>
@@ -308,6 +319,7 @@ export function MyPerformance() {
   const [data, setData] = useState<{ courses: CoursePerf[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedEval, setSelectedEval] = useState<number | null>(null);
 
   const loadData = async () => {
     try {
@@ -419,9 +431,17 @@ export function MyPerformance() {
       {/* Cards de cursos */}
       <div className="space-y-4">
         {data.courses.map(course => (
-          <CourseCard key={course.id} course={course} />
+          <CourseCard key={course.id} course={course} onOpenDetails={setSelectedEval} />
         ))}
       </div>
+
+      {selectedEval && user && (
+        <AttemptDetailsModal
+          evaluationId={selectedEval}
+          identifier={user.cpf || user.email || user.matricula}
+          onClose={() => setSelectedEval(null)}
+        />
+      )}
     </div>
   );
 }

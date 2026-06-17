@@ -597,59 +597,50 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
     );
 
     let currentQuestionWithAlts = null;
+    let currentQuestionWithAlts = null;
     let resultData = null;
     let allResults: any[] | null = null;
+    let participantAnswers: any[] = [];
+    interface ScoreRow { participant_id: number; total_score: number; total_possible: number; justification: number | null; }
+    let studentScores: ScoreRow[] = [];
 
-    const isActiveOrCompleted = evalRow.status === 'active' || evalRow.status === 'completed';
+    if (evalRow.type === 'online') {
+      // Force phase and status so frontend shows the results correctly
+      evalRow.phase = 'completed';
+      evalRow.status = 'completed';
 
-    if (isActiveOrCompleted && evalRow.current_question < questions.length) {
-      const cq = questions[evalRow.current_question];
-      currentQuestionWithAlts = {
-        ...cq,
-        alternatives: alternatives.filter((a: any) => a.question_id === cq.id),
-      };
-
-      if (evalRow.phase === 'result' || evalRow.status === 'completed') {
-        const correctAlt = alternatives.find((a: any) => a.question_id === cq.id && a.is_correct);
-        const { rows: answers } = await pool.query(
-          `SELECT sa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
-           FROM student_answers sa
-           JOIN evaluation_participants ep ON sa.participant_id = ep.id
-           WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
-          [req.params.id, cq.id]
-        );
-        const correctCount = answers.filter((a: any) => a.alternative_id === correctAlt?.id).length;
-
-        const altStats = currentQuestionWithAlts.alternatives.map((alt: any) => ({
-          ...alt,
-          count: answers.filter((a: any) => a.alternative_id === alt.id).length,
-        }));
-
-        const correctParticipants = answers
-          .filter((a: any) => a.alternative_id === correctAlt?.id)
-          .map((a: any) => ({ name: a.participant_name, identifier: a.participant_identifier }));
-
-        resultData = {
-          correct_alternative: correctAlt || null,
-          total_answers: answers.length,
-          correct_count: correctCount,
-          alternatives_stats: altStats,
-          correct_participants: correctParticipants,
-        };
-      }
-    }
-
-    // Resultados completos para avaliação finalizada
-    if (evalRow.status === 'completed') {
       allResults = [];
+      const { rows: bestAttempts } = await pool.query(
+        `WITH RankedAttempts AS (
+           SELECT *, ROW_NUMBER() OVER(PARTITION BY participant_id ORDER BY percentage DESC, total_score DESC, completed_at DESC) as rn
+           FROM online_evaluation_attempts
+           WHERE evaluation_id = $1 AND status = 'completed'
+         )
+         SELECT * FROM RankedAttempts WHERE rn = 1`,
+        [req.params.id]
+      );
+
       for (const q of questions) {
         const qAlts = alternatives.filter((a: any) => a.question_id === q.id);
         const correctAlt = qAlts.find((a: any) => a.is_correct);
+
         const { rows: answers } = await pool.query(
-          `SELECT sa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
-           FROM student_answers sa
-           JOIN evaluation_participants ep ON sa.participant_id = ep.id
-           WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
+          `WITH RankedAttempts AS (
+             SELECT id, participant_id FROM online_evaluation_attempts
+             WHERE evaluation_id = $1 AND status = 'completed'
+           )
+           SELECT aa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
+           FROM online_evaluation_attempt_answers aa
+           JOIN online_evaluation_attempts oea ON aa.attempt_id = oea.id
+           JOIN evaluation_participants ep ON oea.participant_id = ep.id
+           WHERE oea.evaluation_id = $1 AND aa.question_id = $2
+             AND oea.id IN (
+               SELECT id FROM (
+                 SELECT id, ROW_NUMBER() OVER(PARTITION BY participant_id ORDER BY percentage DESC, total_score DESC, completed_at DESC) as rn
+                 FROM online_evaluation_attempts
+                 WHERE evaluation_id = $1 AND status = 'completed'
+               ) t WHERE rn = 1
+             )`,
           [req.params.id, q.id]
         );
 
@@ -664,40 +655,113 @@ router.get('/evaluations/:id/session', authMiddleware, async (req: AuthRequest, 
           total_answers: answers.length,
         });
       }
-    }
 
-    // Respostas do participante (para o professor saber quem já respondeu)
-    let participantAnswers: any[] = [];
-    if (evalRow.status === 'active' && evalRow.current_question < questions.length) {
-      const cq = questions[evalRow.current_question];
-      const { rows: ans } = await pool.query(
-        `SELECT sa.participant_id, sa.alternative_id
-         FROM student_answers sa
-         WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
-        [req.params.id, cq.id]
-      );
-      participantAnswers = ans;
-    }
+      studentScores = participants.map((p: any) => {
+        const attempt = bestAttempts.find((a: any) => a.participant_id === p.id);
+        return {
+          participant_id: p.id,
+          total_score: attempt ? parseFloat(attempt.total_score) || 0 : 0,
+          total_possible: attempt ? parseFloat(attempt.total_possible) || 0 : 0,
+          justification: p.justification,
+        };
+      });
 
-    // Pontuação total de cada aluno
-    interface ScoreRow { participant_id: number; total_score: number; total_possible: number; justification: number | null; }
-    let studentScores: ScoreRow[] = [];
-    if (evalRow.status === 'completed' || evalRow.status === 'active') {
-      const { rows: scores } = await pool.query(
-        `SELECT
-           ep.id AS participant_id,
-           COALESCE(SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END), 0) AS total_score,
-           COALESCE(SUM(q.points), 0) AS total_possible,
-           ep.justification
-         FROM evaluation_participants ep
-         LEFT JOIN student_answers sa ON sa.participant_id = ep.id
-         LEFT JOIN alternatives a ON sa.alternative_id = a.id
-         LEFT JOIN questions q ON sa.question_id = q.id
-         WHERE ep.evaluation_id = $1
-         GROUP BY ep.id, ep.justification`,
-        [req.params.id]
-      );
-      studentScores = scores;
+    } else {
+      const isActiveOrCompleted = evalRow.status === 'active' || evalRow.status === 'completed';
+
+      if (isActiveOrCompleted && evalRow.current_question < questions.length) {
+        const cq = questions[evalRow.current_question];
+        currentQuestionWithAlts = {
+          ...cq,
+          alternatives: alternatives.filter((a: any) => a.question_id === cq.id),
+        };
+
+        if (evalRow.phase === 'result' || evalRow.status === 'completed') {
+          const correctAlt = alternatives.find((a: any) => a.question_id === cq.id && a.is_correct);
+          const { rows: answers } = await pool.query(
+            `SELECT sa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
+             FROM student_answers sa
+             JOIN evaluation_participants ep ON sa.participant_id = ep.id
+             WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
+            [req.params.id, cq.id]
+          );
+          const correctCount = answers.filter((a: any) => a.alternative_id === correctAlt?.id).length;
+
+          const altStats = currentQuestionWithAlts.alternatives.map((alt: any) => ({
+            ...alt,
+            count: answers.filter((a: any) => a.alternative_id === alt.id).length,
+          }));
+
+          const correctParticipants = answers
+            .filter((a: any) => a.alternative_id === correctAlt?.id)
+            .map((a: any) => ({ name: a.participant_name, identifier: a.participant_identifier }));
+
+          resultData = {
+            correct_alternative: correctAlt || null,
+            total_answers: answers.length,
+            correct_count: correctCount,
+            alternatives_stats: altStats,
+            correct_participants: correctParticipants,
+          };
+        }
+      }
+
+      // Resultados completos para avaliação finalizada
+      if (evalRow.status === 'completed') {
+        allResults = [];
+        for (const q of questions) {
+          const qAlts = alternatives.filter((a: any) => a.question_id === q.id);
+          const correctAlt = qAlts.find((a: any) => a.is_correct);
+          const { rows: answers } = await pool.query(
+            `SELECT sa.*, ep.name AS participant_name, ep.identifier AS participant_identifier
+             FROM student_answers sa
+             JOIN evaluation_participants ep ON sa.participant_id = ep.id
+             WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
+            [req.params.id, q.id]
+          );
+
+          allResults.push({
+            question: { id: q.id, text: q.text, order_index: q.order_index, points: q.points },
+            alternatives_stats: qAlts.map((alt: any) => ({
+              ...alt,
+              count: answers.filter((a: any) => a.alternative_id === alt.id).length,
+            })),
+            correct_alternative_id: correctAlt?.id || null,
+            correct_count: answers.filter((a: any) => a.alternative_id === correctAlt?.id).length,
+            total_answers: answers.length,
+          });
+        }
+      }
+
+      // Respostas do participante (para o professor saber quem já respondeu)
+      if (evalRow.status === 'active' && evalRow.current_question < questions.length) {
+        const cq = questions[evalRow.current_question];
+        const { rows: ans } = await pool.query(
+          `SELECT sa.participant_id, sa.alternative_id
+           FROM student_answers sa
+           WHERE sa.evaluation_id = $1 AND sa.question_id = $2`,
+          [req.params.id, cq.id]
+        );
+        participantAnswers = ans;
+      }
+
+      if (evalRow.status === 'completed' || evalRow.status === 'active') {
+        const { rows: scores } = await pool.query(
+          `SELECT
+             ep.id AS participant_id,
+             COALESCE(SUM(CASE WHEN a.is_correct THEN q.points ELSE 0 END), 0) AS total_score,
+             COALESCE(SUM(q.points), 0) AS total_possible,
+             ep.justification
+           FROM evaluation_participants ep
+           LEFT JOIN student_answers sa ON sa.participant_id = ep.id
+           LEFT JOIN alternatives a ON sa.alternative_id = a.id
+           LEFT JOIN questions q ON sa.question_id = q.id
+           WHERE ep.evaluation_id = $1
+           GROUP BY ep.id, ep.justification`,
+          [req.params.id]
+        );
+        studentScores = scores;
+      }
     }
 
     res.json({

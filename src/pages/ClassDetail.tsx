@@ -1047,9 +1047,14 @@ export function ClassDetail() {
                         </>
                       )}
                       {((ev.participant_count || 0) > 0 || (ev.completed_attempt_count || 0) > 0) && (
-                        <button onClick={() => handleResetEvaluation(ev.id)} className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-sm font-bold transition-colors">
-                          Limpar tentativas
-                        </button>
+                        <>
+                          <button onClick={() => navigate(`/evaluation/${ev.id}/session`)} className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm font-bold transition-colors flex items-center gap-2">
+                            <Eye className="w-4 h-4" /> Ver Resultados
+                          </button>
+                          <button onClick={() => handleResetEvaluation(ev.id)} className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-sm font-bold transition-colors">
+                            Limpar tentativas
+                          </button>
+                        </>
                       )}
                       <span className="text-xs font-medium text-gray-500 bg-white border border-gray-200 px-3 py-2 rounded-lg">
                         Disponível após os slides

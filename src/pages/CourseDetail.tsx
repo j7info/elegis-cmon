@@ -26,7 +26,8 @@ export function CourseDetail() {
   const [studentsReport, setStudentsReport] = useState<any[]>([]);
   const [pendingRegistrations, setPendingRegistrations] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [newClassType, setNewClassType] = useState<'presential' | 'online'>('presential');
+  const [newClassType, setNewClassType] = useState<'presential' | 'online' | 'interactive'>('presential');
+  const [interactiveFile, setInteractiveFile] = useState<File | null>(null);
   const [newExpectedDuration, setNewExpectedDuration] = useState('30');
   const [newSlideMinSeconds, setNewSlideMinSeconds] = useState('30');
   const [showEditCourse, setShowEditCourse] = useState(false);
@@ -98,16 +99,25 @@ export function CourseDetail() {
         points_start: parseInt(pointsStart, 10) || 0,
         points_middle: parseInt(pointsMiddle, 10) || 0,
         points_end: parseInt(pointsEnd, 10) || 0,
-        type: newClassType,
-        expected_duration_minutes: newClassType === 'online' ? (parseInt(newExpectedDuration, 10) || 30) : null,
-        slide_minimum_seconds: newClassType === 'online' ? (parseInt(newSlideMinSeconds, 10) || 30) : null,
+        type: newClassType === 'interactive' ? 'online' : newClassType,
+        is_interactive: newClassType === 'interactive',
+        expected_duration_minutes: (newClassType === 'online' || newClassType === 'interactive') ? (parseInt(newExpectedDuration, 10) || 30) : null,
+        slide_minimum_seconds: (newClassType === 'online' || newClassType === 'interactive') ? (parseInt(newSlideMinSeconds, 10) || 30) : null,
       });
 
-      // Anexa o PDF de apresentação, se selecionado
-      if (newPdfFile && created?.id) {
+      // Anexa o PDF de apresentação, se selecionado e não for interativa
+      if (newPdfFile && created?.id && newClassType !== 'interactive') {
         const fd = new FormData();
         fd.append('file', newPdfFile);
         await api.upload(`/classes/${created.id}/presentation`, fd);
+      }
+
+      // Anexa o ZIP da aula interativa
+      if (interactiveFile && created?.id && newClassType === 'interactive') {
+        const fd = new FormData();
+        fd.append('type', 'html');
+        fd.append('file', interactiveFile);
+        await api.upload(`/classes/${created.id}/interactive`, fd);
       }
 
       setNewTitle('');
@@ -116,6 +126,7 @@ export function CourseDetail() {
       setNewDate('');
       setNewTime('');
       setNewPdfFile(null);
+      setInteractiveFile(null);
       setPointsStart('40');
       setPointsMiddle('30');
       setPointsEnd('30');
@@ -255,10 +266,21 @@ export function CourseDetail() {
                     ))}
                   </select>
                 </div>
-
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo de Aula</label>
                   <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewClassType('interactive')}
+                      className={clsx(
+                        'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                        newClassType === 'interactive'
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      Interativa
+                    </button>
                     <button
                       type="button"
                       onClick={() => setNewClassType('presential')}
@@ -345,17 +367,31 @@ export function CourseDetail() {
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
-                  <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
-                    {newPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
-                    <span className={clsx('text-sm', newPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
-                      {newPdfFile ? newPdfFile.name : 'Selecionar PDF (os QR de presença aparecem durante a apresentação)'}
-                    </span>
-                    <input type="file" accept="application/pdf" className="hidden"
-                      onChange={e => setNewPdfFile(e.target.files?.[0] || null)} />
-                  </label>
-                </div>
+                {newClassType === 'interactive' ? (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium text-purple-700">Arquivo da Aula Interativa (.ZIP)</label>
+                    <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-purple-300 rounded-lg cursor-pointer hover:border-purple-400 transition-colors bg-purple-50">
+                      <FileUp className="w-5 h-5 text-purple-400" />
+                      <span className={clsx('text-sm', interactiveFile ? 'text-purple-800 font-medium' : 'text-purple-500')}>
+                        {interactiveFile ? interactiveFile.name : 'Selecionar arquivo .zip com index.html da aula'}
+                      </span>
+                      <input type="file" accept=".zip,application/zip" className="hidden"
+                        onChange={e => setInteractiveFile(e.target.files?.[0] || null)} />
+                    </label>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
+                    <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
+                      {newPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
+                      <span className={clsx('text-sm', newPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
+                        {newPdfFile ? newPdfFile.name : 'Selecionar PDF (os QR de presença aparecem durante a apresentação)'}
+                      </span>
+                      <input type="file" accept="application/pdf" className="hidden"
+                        onChange={e => setNewPdfFile(e.target.files?.[0] || null)} />
+                    </label>
+                  </div>
+                )}
 
                 <button
                   type="submit" 
@@ -379,8 +415,8 @@ export function CourseDetail() {
                 {classes.map(c => (
                   <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex items-center justify-between group">
                     {isStudent ? (
-                      c.type === 'online' ? (
-                        <Link to={`/online-class/${c.id}`} className="flex-1 min-w-0">
+                      c.type === 'online' || c.is_interactive ? (
+                        <Link to={c.is_interactive ? `/interactive-lesson/${c.id}` : `/online-class/${c.id}`} className="flex-1 min-w-0">
                           <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
                           <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                             <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
@@ -407,8 +443,8 @@ export function CourseDetail() {
                     <div className="flex items-center gap-2">
                       {isStudent ? (
                         <>
-                          {c.type === 'online' && c.status === 'active' && (
-                            <Link to={`/online-class/${c.id}`} className="text-xs font-medium px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors">
+                          {(c.type === 'online' || c.is_interactive) && c.status === 'active' && (
+                            <Link to={c.is_interactive ? `/interactive-lesson/${c.id}` : `/online-class/${c.id}`} className="text-xs font-medium px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors">
                               Acessar Aula
                             </Link>
                           )}

@@ -236,15 +236,25 @@ export function ClassDetail() {
         expected_duration_minutes: editType === 'online' ? (parseInt(editExpectedDuration) || 30) : null,
         slide_minimum_seconds: editType === 'online' ? (parseInt(editSlideMinSeconds) || 30) : null,
       });
-      // Remove o PDF se solicitado
+      // Remove o PDF ou arquivo interativo se solicitado
       if (removePdf) {
-        updated = await api.delete(`/classes/${classId}/presentation`);
+        if (classData.is_interactive) {
+          updated = await api.delete(`/classes/${classId}/interactive`);
+        } else {
+          updated = await api.delete(`/classes/${classId}/presentation`);
+        }
       }
-      // Anexa/substitui o PDF de apresentação, se um novo foi selecionado
+
+      // Anexa/substitui o PDF ou ZIP, se um novo foi selecionado
       if (editPdfFile) {
         const fd = new FormData();
         fd.append('file', editPdfFile);
-        updated = await api.upload(`/classes/${classId}/presentation`, fd);
+        if (classData.is_interactive) {
+          fd.append('type', 'html');
+          updated = await api.upload(`/classes/${classId}/interactive`, fd);
+        } else {
+          updated = await api.upload(`/classes/${classId}/presentation`, fd);
+        }
       }
       setClassData(updated);
       setEditPdfFile(null);
@@ -535,7 +545,7 @@ export function ClassDetail() {
   };
 
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
-  const onlineClassUrl = `${appUrl}/#/online-class/${classId}`;
+  const onlineClassUrl = `${appUrl}/#/${classData?.is_interactive ? 'interactive-lesson' : 'online-class'}/${classId}`;
   const registrationUrl = `${appUrl}/#/course-register/${classData?.course_id || ''}`;
   
   const linkToShare = classData?.type === 'online' ? onlineClassUrl : registrationUrl;
@@ -826,7 +836,7 @@ export function ClassDetail() {
             <input
               type="text"
               readOnly
-              value={`${appUrl}/#/online-class/${classId}`}
+              value={linkToShare}
               className="px-4 py-3 outline-none text-gray-500 w-full text-sm"
             />
             <button
@@ -1368,33 +1378,40 @@ export function ClassDetail() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">PDF de Apresentação</label>
-
-                {removePdf ? (
-                  <div className="flex items-center gap-2 px-4 py-3 border border-red-200 rounded-lg bg-red-50">
-                    <span className="text-sm text-red-700 flex-1">PDF será removido ao salvar</span>
-                    <button type="button" onClick={() => setRemovePdf(false)}
-                      className="text-xs text-gray-600 hover:text-gray-800 font-medium">
-                      Cancelar
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
-                      {editPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
-                      <span className={clsx('text-sm', editPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
-                        {editPdfFile ? editPdfFile.name : (classData.presentation_url ? 'Clique para substituir o PDF' : 'Selecionar PDF (opcional)')}
-                      </span>
-                      <input type="file" accept="application/pdf" className="hidden"
-                        onChange={e => setEditPdfFile(e.target.files?.[0] || null)} />
-                    </label>
-                    {classData.presentation_url && !editPdfFile && (
-                      <button type="button" onClick={() => setRemovePdf(true)}
-                        className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center gap-1">
-                        <Trash2 className="w-4 h-4" /> Remover PDF
-                      </button>
-                    )}
-                  </div>
+                <label className="text-sm font-medium text-gray-700">
+                  {classData.is_interactive ? 'Arquivo da Aula Interativa (.ZIP)' : 'PDF de Apresentação'}
+                </label>
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept={classData.is_interactive ? ".zip" : "application/pdf"}
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        setEditPdfFile(e.target.files[0]);
+                        setRemovePdf(false);
+                      }
+                    }}
+                    className="hidden"
+                    id="edit-pdf-upload"
+                  />
+                  <label
+                    htmlFor="edit-pdf-upload"
+                    className="flex flex-col items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-500 hover:bg-teal-50 transition-colors"
+                  >
+                  {editPdfFile ? <FileText className="w-5 h-5 text-teal-600" /> : <FileUp className="w-5 h-5 text-gray-400" />}
+                  <span className={clsx('text-sm', editPdfFile ? 'text-gray-800 font-medium' : 'text-gray-500')}>
+                    {editPdfFile ? editPdfFile.name : (classData.is_interactive ? 'Selecionar arquivo .ZIP' : (classData.presentation_url ? 'Clique para substituir o PDF' : 'Selecionar PDF (opcional)'))}
+                  </span>
+                  </label>
+                </div>
+                {((classData.presentation_url && !classData.is_interactive) || (classData.is_interactive)) && !editPdfFile && (
+                  <button
+                    type="button"
+                    onClick={() => setRemovePdf(true)}
+                    className="text-sm text-red-600 hover:text-red-700 self-start font-medium"
+                  >
+                    {removePdf ? 'Arquivo será removido ao salvar' : 'Remover arquivo atual'}
+                  </button>
                 )}
               </div>
 

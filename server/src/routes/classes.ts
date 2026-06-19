@@ -23,7 +23,7 @@ async function userCanAccessCourse(courseId: string | number, userId: number, ro
   const { rows: studentRows } = await pool.query(
     `SELECT 1
      FROM registrations r
-     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email)
+     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
      WHERE r.course_id = $1 AND u.id = $2
      LIMIT 1`,
     [courseId, userId]
@@ -37,7 +37,12 @@ async function userCanAccessClass(classId: string, userId: number, role: string)
      FROM classes cl
      JOIN courses c ON cl.course_id = c.id
      LEFT JOIN course_teachers ct ON c.id = ct.course_id
-     WHERE cl.id = $1 AND ($2 = 'ADMIN' OR cl.owner_id = $3 OR cl.auxiliary_teacher_id = $3 OR c.owner_id = $3 OR ct.teacher_id = $3)
+     LEFT JOIN app_users u ON u.id = $3
+     LEFT JOIN registrations r
+       ON r.course_id = c.id
+      AND (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
+     WHERE cl.id = $1
+       AND ($2 = 'ADMIN' OR cl.owner_id = $3 OR cl.auxiliary_teacher_id = $3 OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL)
      LIMIT 1`,
     [classId, role, userId]
   );
@@ -54,7 +59,12 @@ router.get('/course/:courseId', authMiddleware, async (req: AuthRequest, res: Re
     }
 
     const { rows } = await pool.query(
-      'SELECT * FROM classes WHERE course_id = $1 ORDER BY created_at DESC',
+      `SELECT c.*, 
+        CASE WHEN il.id IS NOT NULL THEN true ELSE false END as is_interactive
+       FROM classes c
+       LEFT JOIN interactive_lessons il ON il.class_id = c.id
+       WHERE c.course_id = $1 
+       ORDER BY c.created_at DESC`,
       [req.params.courseId]
     );
     res.json(rows);
@@ -66,7 +76,7 @@ router.get('/course/:courseId', authMiddleware, async (req: AuthRequest, res: Re
 
 // POST /api/classes — Criar aula
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds } = req.body;
+  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end, type, is_interactive, expected_duration_minutes, slide_minimum_seconds } = req.body;
 
   if (!course_id || !title?.trim()) {
     res.status(400).json({ error: 'course_id e title são obrigatórios' });
@@ -89,7 +99,21 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
         type || 'presential', expected_duration_minutes || null, slide_minimum_seconds || 30,
       ]
     );
-    res.status(201).json(rows[0]);
+    const createdClass = rows[0];
+
+    if (is_interactive) {
+      const { rows: interactiveRows } = await pool.query(
+        `INSERT INTO interactive_lessons (class_id, type, definition)
+         VALUES ($1, 'html', NULL)
+         ON CONFLICT (class_id) DO NOTHING
+         RETURNING *`,
+        [createdClass.id]
+      );
+      res.status(201).json({ ...createdClass, is_interactive: interactiveRows.length > 0 });
+      return;
+    }
+
+    res.status(201).json({ ...createdClass, is_interactive: false });
   } catch (err) {
     console.error('Create class error:', err);
     res.status(500).json({ error: 'Erro ao criar aula' });
@@ -99,7 +123,14 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
 // GET /api/classes/:id — Detalhes da aula (público para scan pages)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM classes WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query(
+      `SELECT c.*,
+              CASE WHEN il.id IS NOT NULL THEN true ELSE false END AS is_interactive
+       FROM classes c
+       LEFT JOIN interactive_lessons il ON il.class_id = c.id
+       WHERE c.id = $1`,
+      [req.params.id]
+    );
     if (rows.length === 0) {
       res.status(404).json({ error: 'Aula não encontrada' });
       return;
@@ -123,6 +154,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       type: classData.type,
       expected_duration_minutes: classData.expected_duration_minutes,
       slide_minimum_seconds: classData.slide_minimum_seconds,
+      is_interactive: classData.is_interactive,
     });
   } catch (err) {
     console.error('Get class error:', err);

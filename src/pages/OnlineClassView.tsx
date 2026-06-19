@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import * as pdfjsLib from 'pdfjs-dist';
 import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award } from 'lucide-react';
@@ -19,7 +19,25 @@ function formatTime(seconds: number): string {
 
 export function OnlineClassView() {
   const { classId } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
+
+  // Redirect if class is interactive
+  useEffect(() => {
+    if (!classId) return;
+    (async () => {
+      try {
+        const res = await api.get(`/classes/${classId}`);
+        const data = res.class || res; 
+        if (data?.is_interactive) {
+          navigate(`/interactive-lesson/${classId}`, { replace: true });
+        }
+      } catch (e) {
+        console.error('Error fetching class data for redirect', e);
+      }
+    })();
+  }, [classId, navigate]);
+
   const [step, setStep] = useState<'join' | 'loading' | 'intro' | 'viewing' | 'completed' | 'evaluation'>('join');
 
   // Join form
@@ -298,7 +316,7 @@ export function OnlineClassView() {
   // Joining screen
   if (step === 'join') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <main key="join" className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
           <div className="bg-gradient-to-r from-teal-600 to-teal-500 p-6 text-white text-center">
             <BookOpen className="w-10 h-10 mx-auto mb-2 opacity-90" />
@@ -307,11 +325,9 @@ export function OnlineClassView() {
           </div>
 
           <form onSubmit={handleJoin} className="p-6 space-y-4">
-            {joinError && (
-              <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
-                {joinError}
-              </div>
-            )}
+            <div className={`p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100 ${!joinError ? 'hidden' : ''}`}>
+              {joinError || 'Erro'}
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label>
@@ -348,26 +364,26 @@ export function OnlineClassView() {
             </button>
           </form>
         </div>
-      </div>
+      </main>
     );
   }
 
   // Loading screen
   if (step === 'loading') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <main key="loading" className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
           <p className="text-sm text-gray-500">Preparando aula...</p>
         </div>
-      </div>
+      </main>
     );
   }
 
   // Intro screen
   if (step === 'intro') {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+      <main key="intro" className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
           <div className="bg-teal-600 p-8 text-white text-center">
             <BookOpen className="w-12 h-12 mx-auto mb-4" />
@@ -402,14 +418,14 @@ export function OnlineClassView() {
             </button>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   // Completed screen
   if (step === 'completed') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <main key="completed" className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden text-center">
           <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-8 text-white">
             <CheckCircle2 className="w-16 h-16 mx-auto mb-3" />
@@ -474,7 +490,7 @@ export function OnlineClassView() {
             </Link>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -489,7 +505,7 @@ export function OnlineClassView() {
     const isFinished = onlineEvalState?.status === 'idle' || onlineEvalState?.status === 'attempts_exhausted';
 
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <main key="evaluation" className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-teal-600 to-teal-500 p-6 text-white">
@@ -598,7 +614,7 @@ export function OnlineClassView() {
             )}
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -606,7 +622,7 @@ export function OnlineClassView() {
   const slidePct = totalSlides > 0 ? Math.round(((currentSlide) / totalSlides) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
+    <main key="viewing" className="min-h-screen bg-gray-900 flex flex-col">
       {/* Top bar */}
       <header className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -734,6 +750,6 @@ export function OnlineClassView() {
           )}
         </div>
       </footer>
-    </div>
+    </main>
   );
 }

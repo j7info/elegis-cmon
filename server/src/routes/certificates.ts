@@ -10,7 +10,11 @@ async function userCanAccessCourse(courseId: string | number, userId: number, ro
     `SELECT 1
      FROM courses c
      LEFT JOIN course_teachers ct ON c.id = ct.course_id
-     WHERE c.id = $1 AND ($2 = 'ADMIN' OR c.owner_id = $3 OR ct.teacher_id = $3)
+     LEFT JOIN app_users u ON u.id = $3
+     LEFT JOIN registrations r
+       ON r.course_id = c.id
+      AND (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
+     WHERE c.id = $1 AND ($2 = 'ADMIN' OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL)
      LIMIT 1`,
     [courseId, role, userId]
   );

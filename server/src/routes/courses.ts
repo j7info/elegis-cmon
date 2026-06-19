@@ -22,7 +22,7 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
   const { rows: studentRows } = await pool.query(
     `SELECT 1
      FROM registrations r
-     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email)
+     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
      WHERE r.course_id = $1 AND u.id = $2
      LIMIT 1`,
     [courseId, userId]

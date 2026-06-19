@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador SIGADOC</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Transições suaves */
+    .slide-down {
+      transition: max-height 0.3s ease-in-out, padding 0.3s ease-in-out, opacity 0.3s ease-in-out;
+      max-height: 0;
+      opacity: 0;
+      overflow: hidden;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    .slide-down.open {
+      max-height: 500px;
+      opacity: 1;
+      padding-top: 12px;
+      padding-bottom: 12px;
+    }
+    .rotate-180 {
+      transform: rotate(180deg);
+    }
+    .arrow-icon {
+      transition: transform 0.2s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen w-full m-0 p-0 overflow-hidden flex flex-col">
+  <div class="bg-white border-b border-slate-200 px-4 py-3 shadow-sm z-20">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div>
+        <div id="progress-label" class="text-sm font-bold text-slate-800">Visualização: 0%</div>
+        <div id="time-lock" class="text-xs text-slate-500 mt-0.5">Carregando regra de permanência...</div>
+      </div>
+      <div class="w-full sm:w-72 h-3 bg-slate-200 rounded-full overflow-hidden">
+        <div id="progress-bar" class="h-full bg-blue-600 transition-all duration-300" style="width: 0%"></div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="flex flex-col md:flex-row flex-1 min-h-0 w-full">
+    <!-- Esquerda: Imagem -->
+    <div class="flex-1 p-6 flex flex-col items-center justify-center bg-slate-100 border-r border-slate-200">
+      <div class="bg-white p-2 rounded-xl shadow-lg ring-1 ring-slate-900/5 max-h-[90vh] flex items-center justify-center">
+        <img id="step-image" src="" alt="Tela SIGADOC" class="max-h-[85vh] w-auto object-contain rounded" />
+      </div>
+    </div>
+
+    <!-- Direita: Conteúdo -->
+    <div class="w-full md:w-[450px] lg:w-[500px] flex flex-col h-full bg-white shadow-xl relative">
+      <!-- Cabeçalho do Passo -->
+      <div class="p-8 border-b border-slate-100 bg-white z-10 shadow-sm">
+        <div id="step-counter" class="text-sm font-semibold tracking-wider text-blue-600 mb-2">PASSO 1 DE 14</div>
+        <h2 id="step-title" class="text-2xl font-bold text-slate-900 leading-tight">Carregando...</h2>
+        <p id="step-explanation" class="mt-4 text-slate-600 leading-relaxed text-sm"></p>
+      </div>
+
+      <!-- Lista de Pontos Clicáveis (Hotspots) -->
+      <div class="flex-1 overflow-y-auto p-8 bg-slate-50">
+        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Pontos de Interação</h3>
+        <div id="hotspots-container" class="space-y-3">
+          <!-- Os hotspots serão injetados via JS -->
+        </div>
+      </div>
+
+      <!-- Rodapé: Navegação -->
+      <div class="p-6 border-t border-slate-200 bg-white flex justify-between items-center z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <button id="btn-prev" class="px-5 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded-lg hover:bg-slate-100">
+          ← Anterior
+        </button>
+        <div id="btn-next-container">
+          <button id="btn-next" class="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-md transition-colors">
+            Próximo →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script>
+    let currentStep = 0;
+    let activeHotspotIndex = null;
+    const queryParams = new URLSearchParams(window.location.search);
+    const minSeconds = Math.max(0, Number(queryParams.get('min_seconds') || '0') || 0);
+    const reviewMode = queryParams.get('review') === '1';
+    const viewedSteps = new Set();
+    const unlockedSteps = new Set(reviewMode ? sigadocData.map((_, idx) => idx) : []);
+    let remainingSeconds = 0;
+    let lockTimer = null;
+
+    const els = {
+      progressLabel: document.getElementById('progress-label'),
+      progressBar: document.getElementById('progress-bar'),
+      timeLock: document.getElementById('time-lock'),
+      image: document.getElementById('step-image'),
+      counter: document.getElementById('step-counter'),
+      title: document.getElementById('step-title'),
+      explanation: document.getElementById('step-explanation'),
+      hotspotsContainer: document.getElementById('hotspots-container'),
+      btnPrev: document.getElementById('btn-prev'),
+      btnNextContainer: document.getElementById('btn-next-container'),
+    };
+
+    function toggleHotspot(index) {
+      if (activeHotspotIndex === index) {
+        activeHotspotIndex = null;
+      } else {
+        activeHotspotIndex = index;
+      }
+      renderHotspots();
+    }
+
+    function renderHotspots() {
+      const data = sigadocData[currentStep];
+      els.hotspotsContainer.innerHTML = '';
+      
+      data.hotspots.forEach((hotspot, idx) => {
+        const isActive = activeHotspotIndex === idx;
+        
+        const card = document.createElement('div');
+        card.className = `border rounded-lg transition-all duration-200 overflow-hidden ${
+          isActive ? 'bg-white border-blue-500 shadow-md ring-1 ring-blue-500' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
+        }`;
+
+        const btn = document.createElement('button');
+        btn.onclick = () => toggleHotspot(idx);
+        btn.className = "w-full text-left px-5 py-4 flex items-center justify-between focus:outline-none";
+        
+        const titleSpan = document.createElement('span');
+        titleSpan.className = `font-medium ${isActive ? 'text-blue-700' : 'text-slate-700'}`;
+        titleSpan.textContent = hotspot.title;
+
+        const arrowSpan = document.createElement('span');
+        arrowSpan.className = `text-xl arrow-icon ${isActive ? 'rotate-180 text-blue-500' : 'text-slate-400'}`;
+        arrowSpan.textContent = '▾';
+
+        btn.appendChild(titleSpan);
+        btn.appendChild(arrowSpan);
+        card.appendChild(btn);
+
+        const descDiv = document.createElement('div');
+        descDiv.className = `px-5 text-sm text-slate-600 leading-relaxed border-t border-slate-50 bg-blue-50/30 slide-down ${isActive ? 'open border-t-slate-200' : ''}`;
+        descDiv.textContent = hotspot.description;
+        
+        card.appendChild(descDiv);
+        els.hotspotsContainer.appendChild(card);
+      });
+    }
+
+    function updateProgressHeader() {
+      const pct = Math.round((viewedSteps.size / sigadocData.length) * 100);
+      els.progressLabel.textContent = `Visualização: ${pct}% (${viewedSteps.size}/${sigadocData.length} páginas)`;
+      els.progressBar.style.width = `${pct}%`;
+    }
+
+    function canLeaveCurrentStep() {
+      return reviewMode || unlockedSteps.has(currentStep);
+    }
+
+    function updateNextButtonState() {
+      const btnNext = document.getElementById('btn-next');
+      if (!btnNext) return;
+
+      const canLeave = canLeaveCurrentStep();
+      btnNext.disabled = !canLeave;
+      btnNext.className = canLeave
+        ? 'px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-md transition-colors'
+        : 'px-8 py-2.5 bg-slate-300 text-slate-500 text-sm font-semibold rounded-lg shadow-none cursor-not-allowed transition-colors';
+    }
+
+    function updateFinishButtonState() {
+      const btnFinish = document.getElementById('btn-finish');
+      if (!btnFinish) return;
+
+      const canFinish = canLeaveCurrentStep();
+      btnFinish.disabled = !canFinish;
+      btnFinish.className = canFinish
+        ? 'px-8 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-md transition-colors'
+        : 'px-8 py-2.5 bg-slate-300 text-slate-500 text-sm font-semibold rounded-lg shadow-none cursor-not-allowed transition-colors';
+    }
+
+    function refreshLockStatus() {
+      if (reviewMode) {
+        els.timeLock.textContent = 'Modo revisão: navegação livre entre as páginas.';
+      } else if (canLeaveCurrentStep()) {
+        els.timeLock.textContent = 'Tempo mínimo cumprido. Você pode avançar.';
+      } else {
+        els.timeLock.textContent = `Permaneça nesta página por mais ${remainingSeconds}s para avançar.`;
+      }
+
+      updateNextButtonState();
+      updateFinishButtonState();
+    }
+
+    function startStepLock() {
+      if (lockTimer) {
+        clearInterval(lockTimer);
+        lockTimer = null;
+      }
+
+      if (reviewMode || unlockedSteps.has(currentStep) || minSeconds === 0) {
+        unlockedSteps.add(currentStep);
+        remainingSeconds = 0;
+        refreshLockStatus();
+        return;
+      }
+
+      remainingSeconds = minSeconds;
+      refreshLockStatus();
+
+      lockTimer = setInterval(() => {
+        remainingSeconds = Math.max(0, remainingSeconds - 1);
+        if (remainingSeconds === 0) {
+          unlockedSteps.add(currentStep);
+          clearInterval(lockTimer);
+          lockTimer = null;
+        }
+        refreshLockStatus();
+      }, 1000);
+    }
+
+    function renderStep() {
+      const data = sigadocData[currentStep];
+      viewedSteps.add(currentStep);
+      els.image.src = data.image;
+      els.image.alt = data.title;
+      const pct = Math.floor(((currentStep + 1) / sigadocData.length) * 100);
+      els.counter.textContent = `PASSO ${currentStep + 1} DE ${sigadocData.length}`;
+      els.title.textContent = data.title;
+      els.explanation.textContent = data.explanation;
+      
+      els.btnPrev.disabled = currentStep === 0;
+
+      if (currentStep < sigadocData.length - 1) {
+        els.btnNextContainer.innerHTML = `<button id="btn-next" onclick="nextStep()" class="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-md transition-colors">Próximo →</button>`;
+      } else {
+        els.btnNextContainer.innerHTML = `<button id="btn-finish" onclick="finishSim()" class="px-8 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-md transition-colors">Finalizar Simulação</button>`;
+      }
+
+      updateProgressHeader();
+      window.parent.postMessage({ type: 'INTERACTIVE_VIEW_PROGRESS', data: { percent: Math.round((viewedSteps.size / sigadocData.length) * 100), module: 'sigadoc-001' } }, '*');
+
+      activeHotspotIndex = null;
+      renderHotspots();
+      startStepLock();
+    }
+
+    function nextStep() {
+      if (currentStep < sigadocData.length - 1 && canLeaveCurrentStep()) {
+        currentStep++;
+        renderStep();
+      }
+    }
+
+    els.btnPrev.onclick = function() {
+      if (currentStep > 0) {
+        currentStep--;
+        renderStep();
+      }
+    }
+
+    function finishSim() {
+      if (!canLeaveCurrentStep()) return;
+      alert("Simulação concluída com sucesso!");
+      window.parent.postMessage({ type: 'LESSON_PROGRESS', data: { score: 100, module: 'sigadoc-001' } }, '*');
+    }
+
+    // Init
+    renderStep();
+  </script>
+</body>
+</html>

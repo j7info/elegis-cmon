@@ -1,11 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { InteractiveLesson_ExcelBasico } from './InteractiveLesson_ExcelBasico';
 import SigadocSimulador from '../components/interactive/SigadocSimulador/SigadocSimulador';
 import { useAuth } from '../lib/AuthContext';
-import { BookOpen, LogIn, Loader2, CheckCircle2, BarChart, ArrowLeft } from 'lucide-react';
+import { BookOpen, LogIn, Loader2, CheckCircle2, BarChart, ArrowLeft, HelpCircle, Award } from 'lucide-react';
 import clsx from 'clsx';
+
+function formatTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(safeSeconds / 60);
+  const s = safeSeconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 export function InteractiveLessonPage() {
   const { classId } = useParams<{ classId: string }>();
@@ -16,12 +23,18 @@ export function InteractiveLessonPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  const [step, setStep] = useState<'join' | 'viewing' | 'completed'>('join');
+  const [step, setStep] = useState<'join' | 'viewing' | 'completed' | 'evaluation'>('join');
   const [identifier, setIdentifier] = useState(user?.cpf || user?.email || '');
   const [fullName, setFullName] = useState(user?.name || '');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinLoading, setJoinLoading] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
+  const [onlineEvalState, setOnlineEvalState] = useState<any>(null);
+  const [selectedAlternativeId, setSelectedAlternativeId] = useState<number | null>(null);
+  const [evalTimerLeft, setEvalTimerLeft] = useState<number | null>(null);
+  const [evalSubmitting, setEvalSubmitting] = useState(false);
+  const [evalError, setEvalError] = useState<string | null>(null);
+  const [loadEvalId, setLoadEvalId] = useState<number | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = 'pt-BR';
@@ -108,6 +121,76 @@ export function InteractiveLessonPage() {
       setJoinError(err?.message || 'Erro ao acessar aula');
     } finally {
       setJoinLoading(false);
+    }
+  };
+
+  const refreshEvaluationState = useCallback(async () => {
+    if (!loadEvalId || !identifier.trim()) return;
+    const stateRes = await api.get(`/evaluations/${loadEvalId}/online/state?identifier=${encodeURIComponent(identifier.trim())}`);
+    setOnlineEvalState(stateRes);
+    setSelectedAlternativeId(null);
+  }, [loadEvalId, identifier]);
+
+  useEffect(() => {
+    if (step !== 'evaluation' || onlineEvalState?.status !== 'in_progress') return;
+
+    const interval = setInterval(() => {
+      const startedAt = onlineEvalState.question_started_at || Date.now();
+      const questionTime = onlineEvalState.evaluation?.question_time || 30;
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const remaining = Math.max(0, questionTime - elapsed);
+      setEvalTimerLeft(remaining);
+
+      if (remaining === 0) {
+        refreshEvaluationState().catch(() => {});
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [step, onlineEvalState, refreshEvaluationState]);
+
+  const handleStartEvaluation = async (forceNewAttempt = false) => {
+    if (!classId) return;
+    setEvalError(null);
+    setEvalSubmitting(true);
+    try {
+      const onlineEval = await api.get(`/classes/${classId}/online/evaluation`);
+      const startRes = await api.post(`/evaluations/${onlineEval.id}/online/start`, {
+        identifier: identifier.trim(),
+        force_new_attempt: forceNewAttempt,
+      });
+      setLoadEvalId(onlineEval.id);
+      setOnlineEvalState(startRes);
+      setSelectedAlternativeId(null);
+      setEvalTimerLeft(startRes.time_left_seconds ?? startRes.evaluation?.question_time ?? null);
+      setStep('evaluation');
+    } catch (err: any) {
+      setEvalError(err?.message || 'Erro ao iniciar avaliação');
+    } finally {
+      setEvalSubmitting(false);
+    }
+  };
+
+  const handleAnswerEvaluation = async (alternativeId: number) => {
+    if (!loadEvalId || !onlineEvalState?.attempt || !onlineEvalState?.question || evalSubmitting || selectedAlternativeId) return;
+    setEvalSubmitting(true);
+    setEvalError(null);
+    setSelectedAlternativeId(alternativeId);
+    try {
+      const res = await api.post(`/evaluations/${loadEvalId}/online/answer`, {
+        identifier: identifier.trim(),
+        attempt_id: onlineEvalState.attempt.id,
+        question_id: onlineEvalState.question.id,
+        alternative_id: alternativeId,
+      });
+      setOnlineEvalState(res);
+      setSelectedAlternativeId(null);
+      setEvalTimerLeft(res.time_left_seconds ?? res.evaluation?.question_time ?? null);
+    } catch (err: any) {
+      setEvalError(err?.message || 'Não foi possível registrar a resposta');
+      await refreshEvaluationState().catch(() => {});
+    } finally {
+      setEvalSubmitting(false);
     }
   };
 
@@ -210,6 +293,18 @@ export function InteractiveLessonPage() {
             </div>
 
             <button
+              onClick={() => handleStartEvaluation()}
+              disabled={evalSubmitting}
+              className="block w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-bold transition-colors"
+            >
+              {evalSubmitting ? 'Carregando avaliação...' : 'Responder Questionário'}
+            </button>
+            {evalError && (
+              <div className="p-3 bg-amber-50 text-amber-700 text-sm rounded-lg border border-amber-100">
+                {evalError}
+              </div>
+            )}
+            <button
               onClick={() => navigate(-1)}
               className="block w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors"
             >
@@ -224,6 +319,135 @@ export function InteractiveLessonPage() {
             >
               Rever Aula
             </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (step === 'evaluation') {
+    const question = onlineEvalState?.question;
+    const bestAttempt = onlineEvalState?.best_attempt;
+    const attemptsRemaining = onlineEvalState?.attempts_remaining ?? 0;
+    const questionTime = onlineEvalState?.evaluation?.question_time || 30;
+    const timeLeft = evalTimerLeft ?? onlineEvalState?.time_left_seconds ?? questionTime;
+    const timerPct = questionTime > 0 ? Math.max(0, Math.min(100, ((questionTime - timeLeft) / questionTime) * 100)) : 0;
+    const isFinished = onlineEvalState?.status === 'idle' || onlineEvalState?.status === 'attempts_exhausted';
+
+    return (
+      <main key="evaluation" translate="no" className="notranslate min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
+          <div className="bg-gradient-to-r from-teal-600 to-teal-500 p-6 text-white">
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <HelpCircle className="w-6 h-6" /> Questionário da Aula
+            </h1>
+            <p className="text-sm text-teal-100 mt-1">
+              {onlineEvalState?.evaluation?.title || config?.title || 'Avaliação'}
+            </p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {isFinished ? (
+              <div className="text-center py-8">
+                <Award className="w-16 h-16 text-teal-500 mx-auto mb-4" />
+                <h2 className="text-2xl font-black text-gray-900 mb-2">Questionário concluído</h2>
+                <p className="text-gray-500">
+                  Melhor nota: <strong className="text-teal-700">{bestAttempt?.percentage ?? 0}%</strong>
+                  {' '}({bestAttempt?.total_score ?? 0} de {bestAttempt?.total_possible ?? 0} pontos)
+                </p>
+                <p className="text-sm text-gray-400 mt-2">
+                  Tentativas usadas: {onlineEvalState?.attempts_used ?? 0} de 3
+                </p>
+                {attemptsRemaining > 0 && (
+                  <button
+                    onClick={() => handleStartEvaluation(true)}
+                    disabled={evalSubmitting}
+                    className="mt-6 px-6 py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg font-bold transition-colors"
+                  >
+                    Fazer nova tentativa ({attemptsRemaining} restante{attemptsRemaining > 1 ? 's' : ''})
+                  </button>
+                )}
+              </div>
+            ) : !question ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-10 h-10 text-teal-600 animate-spin mx-auto mb-3" />
+                <p className="text-gray-400">Carregando questão...</p>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <div>
+                  <div className="flex items-center justify-between gap-4 mb-2">
+                    <span className="text-sm font-bold text-teal-700">
+                      Questão {(onlineEvalState?.question_index ?? 0) + 1} de {onlineEvalState?.evaluation?.question_count || 0}
+                    </span>
+                    <span className={clsx(
+                      'text-sm font-black tabular-nums',
+                      timeLeft > 10 ? 'text-teal-700' : timeLeft > 0 ? 'text-amber-600' : 'text-red-600'
+                    )}>
+                      {formatTime(timeLeft)}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-teal-500 transition-all" style={{ width: `${timerPct}%` }} />
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+                  <div className="flex items-start justify-between mb-4">
+                    <h3 className="font-bold text-gray-900 leading-relaxed flex-1">{question.text}</h3>
+                    <span className="text-xs font-medium text-gray-400 bg-white px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
+                      {question.points} pts
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {question.alternatives.map((alt: any, aIdx: number) => (
+                      <button
+                        key={alt.id}
+                        onClick={() => handleAnswerEvaluation(alt.id)}
+                        disabled={evalSubmitting || timeLeft <= 0 || selectedAlternativeId !== null}
+                        className={clsx(
+                          'w-full text-left px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all disabled:cursor-not-allowed',
+                          selectedAlternativeId === alt.id
+                            ? 'border-teal-500 bg-teal-50 text-teal-800'
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 disabled:opacity-60'
+                        )}
+                      >
+                        <span className="mr-2 font-bold text-xs">{String.fromCharCode(65 + aIdx)}</span>
+                        {alt.text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-6 border-t border-gray-100">
+            {evalError && (
+              <div className="mb-3 p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
+                {evalError}
+              </div>
+            )}
+            {isFinished ? (
+              <div className="grid sm:grid-cols-2 gap-3">
+                <button
+                  onClick={() => setStep('completed')}
+                  className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors"
+                >
+                  Voltar à Aula
+                </button>
+                <Link
+                  to="/"
+                  className="block w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold text-center transition-colors"
+                >
+                  Voltar ao Início
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 text-center">
+                Ao selecionar uma alternativa, o sistema avança para a próxima questão.
+              </p>
+            )}
           </div>
         </div>
       </main>

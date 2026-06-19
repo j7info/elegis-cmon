@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { normalizeIdentifier } from '../lib/identifier';
 import { CheckCircle2, User, Briefcase, Building2, BookA, AtSign } from 'lucide-react';
 
 export function RegisterClass() {
   const { classId } = useParams();
+  const navigate = useNavigate();
   const [classData, setClassData] = useState<any>(null);
   const [courseData, setCourseData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -86,9 +87,17 @@ export function RegisterClass() {
               <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-4" />
               <h3 className="text-2xl font-bold text-gray-900 mb-2">Ótimo!</h3>
               <p className="text-gray-600">{success}</p>
-              <p className="text-sm text-gray-500 mt-4 bg-gray-50 p-4 rounded-lg">
-                Durante a aula, basta escanear o QR Code e digitar o mesmo CPF/Email que utilizou aqui.
-              </p>
+              <div className="mt-8 space-y-4">
+                <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg">
+                  Durante a aula, basta escanear o QR Code e digitar o mesmo CPF/Email que utilizou aqui.
+                </p>
+                <button 
+                  onClick={() => navigate('/')}
+                  className="w-full py-4 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold shadow-md transition-colors"
+                >
+                  Acessar Plataforma
+                </button>
+              </div>
             </div>
           ) : (
             <>

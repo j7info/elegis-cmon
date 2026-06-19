@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { normalizeIdentifier } from '../lib/identifier';
 import { CheckCircle2, User, Briefcase, Building2, BookA, AtSign, Clock } from 'lucide-react';
 
 export function RegisterCourse() {
   const { courseId } = useParams();
+  const navigate = useNavigate();
   const [courseData, setCourseData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -89,14 +90,30 @@ export function RegisterCourse() {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{isApproved ? 'Ótimo!' : 'Aguarde'}</h3>
               <p className="text-gray-600">{success}</p>
               {isApproved && (
-                <p className="text-sm text-gray-500 mt-4 bg-gray-50 p-4 rounded-lg">
-                  Agora você pode realizar login com seu usuário para acessar todo o conteúdo. Durante as aulas, basta escanear o QR Code de presença.
-                </p>
+                <div className="mt-8 space-y-4">
+                  <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg">
+                    Agora você pode realizar login com seu usuário para acessar todo o conteúdo. Durante as aulas, basta escanear o QR Code de presença.
+                  </p>
+                  <button 
+                    onClick={() => navigate('/')}
+                    className="w-full py-4 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold shadow-md transition-colors"
+                  >
+                    Acessar Plataforma
+                  </button>
+                </div>
               )}
               {!isApproved && (
-                <p className="text-sm text-gray-500 mt-4 bg-gray-50 p-4 rounded-lg">
-                  Assim que o professor aprovar sua inscrição, você receberá seus dados de acesso ao portal do curso.
-                </p>
+                <div className="mt-8 space-y-4">
+                  <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg">
+                    Assim que o professor aprovar sua inscrição, você receberá seus dados de acesso ao portal do curso.
+                  </p>
+                  <button 
+                    onClick={() => navigate('/')}
+                    className="w-full py-4 px-4 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl font-bold transition-colors"
+                  >
+                    Voltar para o Início
+                  </button>
+                </div>
               )}
             </div>
           ) : (

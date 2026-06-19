@@ -1,6 +1,6 @@
 const sigadocData = [
   {
-    "image": "./assets/tela-01.png",
+    "image": "./assets/tela-14.png",
     "title": "Login do SIGADOC",
     "explanation": "Esta é a tela inicial de acesso ao SIGADOC, sistema utilizado para criação, assinatura, tramitação, acompanhamento e organização de documentos administrativos da Câmara Municipal de Ourilândia do Norte. O acesso é feito por matrícula e senha, garantindo que cada ação realizada no sistema fique vinculada ao usuário responsável.",
     "hotspots": [
@@ -47,7 +47,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-02.png",
+    "image": "./assets/tela-01.png",
     "title": "Painel inicial do sistema",
     "explanation": "Após o login, o usuário é direcionado ao painel inicial. Esta tela apresenta um resumo das principais áreas de trabalho do SIGADOC, como expedientes, processos administrativos, tarefas, solicitações, gestão do conhecimento e transportes. Também mostra contadores que ajudam o usuário a acompanhar documentos sob sua responsabilidade ou vinculados à sua lotação.",
     "hotspots": [
@@ -114,7 +114,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-03.png",
+    "image": "./assets/tela-02.png",
     "title": "Mesa Virtual",
     "explanation": "A Mesa Virtual é a principal área de trabalho do usuário dentro do SIGADOC. Nela ficam reunidos os documentos que exigem acompanhamento, como alertas, caixa de entrada, documentos aguardando andamento e outros expedientes. É a partir dessa tela que o usuário acompanha prazos, verifica pendências e acessa documentos para providências.",
     "hotspots": [
@@ -177,7 +177,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-04.png",
+    "image": "./assets/tela-03.png",
     "title": "Menu Documentos",
     "explanation": "O menu Documentos reúne as principais ações relacionadas à criação, consulta, movimentação e administração de documentos. Por ele, o usuário pode criar novos documentos, pesquisar expedientes, acessar a Mesa Virtual e executar operações em lote.",
     "hotspots": [
@@ -240,7 +240,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-05.png",
+    "image": "./assets/tela-04.png",
     "title": "Mesa Virtual com destaque para Criar Documento",
     "explanation": "Nesta tela, o botão Criar Documento aparece em destaque. Ele é uma das ações mais importantes do SIGADOC, pois inicia a produção de um novo expediente administrativo, como memorando, portaria, despacho, solicitação, parecer ou documento externo.",
     "hotspots": [
@@ -263,7 +263,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-06.png",
+    "image": "./assets/tela-05.png",
     "title": "Criação de novo documento",
     "explanation": "Esta é a tela inicial de criação de um novo documento. Nela, o usuário define o modelo do documento, o tipo de acesso, o subscritor, o destinatário, a classificação documental e o texto que será inserido no corpo do documento.",
     "hotspots": [
@@ -330,7 +330,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-07.png",
+    "image": "./assets/tela-06.png",
     "title": "Seleção do modelo do documento",
     "explanation": "Ao criar um novo documento, o usuário precisa escolher o modelo adequado. O modelo define a natureza do documento, sua estrutura, finalidade e possíveis fluxos de uso dentro do sistema.",
     "hotspots": [
@@ -377,7 +377,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-08.png",
+    "image": "./assets/tela-07.png",
     "title": "Tipo de destinatário",
     "explanation": "O campo Destinatário define para onde o documento será encaminhado. A escolha correta é importante para garantir que o expediente chegue ao setor, pessoa ou destino adequado dentro do fluxo administrativo.",
     "hotspots": [
@@ -408,7 +408,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-09.png",
+    "image": "./assets/tela-08.png",
     "title": "Pesquisa de Classificação Documental",
     "explanation": "A classificação documental organiza os documentos conforme assunto, classe, subclasse e atividade. Essa etapa é importante para padronizar o arquivamento, facilitar pesquisas futuras e manter a gestão documental adequada.",
     "hotspots": [
@@ -447,7 +447,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-10.png",
+    "image": "./assets/tela-09.png",
     "title": "Editor do corpo do memorando",
     "explanation": "Nesta etapa, o usuário redige o conteúdo do documento. O SIGADOC gera automaticamente partes estruturais, como cabeçalho, identificação institucional, dados do subscritor e classificação, enquanto o usuário insere o texto principal do expediente.",
     "hotspots": [
@@ -490,7 +490,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-11.png",
+    "image": "./assets/tela-10.png",
     "title": "Pré-visualização do documento",
     "explanation": "A pré-visualização permite conferir como o documento ficará antes de ser salvo, assinado ou tramitado. Essa etapa ajuda a evitar erros de formatação, destinatário, assunto ou conteúdo.",
     "hotspots": [
@@ -533,7 +533,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-12.png",
+    "image": "./assets/tela-11.png",
     "title": "Visualização do documento criado",
     "explanation": "Após criado, o documento passa a ter número oficial, situação definida e ações disponíveis. Nesta tela o usuário acompanha o conteúdo, a tramitação, as vias, os metadados e os botões de ação do documento.",
     "hotspots": [
@@ -660,7 +660,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-13.png",
+    "image": "./assets/tela-12.png",
     "title": "Pesquisa de documentos com filtros",
     "explanation": "A tela de pesquisa permite localizar documentos no SIGADOC usando filtros detalhados. Ela é essencial para encontrar expedientes por período, situação, órgão, origem, tipo, espécie, modelo, número, subscritor, destinatário, descrição ou classificação.",
     "hotspots": [
@@ -755,7 +755,7 @@ const sigadocData = [
     ]
   },
   {
-    "image": "./assets/tela-14.png",
+    "image": "./assets/tela-13.png",
     "title": "Resultado da pesquisa de documentos",
     "explanation": "Esta tela mostra os documentos encontrados a partir da pesquisa realizada. Os resultados são apresentados em tabela, permitindo acessar cada documento pelo número, verificar sua situação, tipo, modelo, descrição, datas, subscritor e atendente.",
     "hotspots": [

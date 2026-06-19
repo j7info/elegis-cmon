@@ -86,7 +86,7 @@
     let currentStep = 0;
     let activeHotspotIndex = null;
     const queryParams = new URLSearchParams(window.location.search);
-    const minSeconds = Math.max(0, Number(queryParams.get('min_seconds') || '0') || 0);
+    const minSeconds = Math.max(0, Number(queryParams.get('min_seconds') || '30') || 30);
     const reviewMode = queryParams.get('review') === '1';
     const viewedSteps = new Set();
     const unlockedSteps = new Set(reviewMode ? sigadocData.map((_, idx) => idx) : []);

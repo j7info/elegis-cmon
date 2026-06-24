@@ -81,7 +81,8 @@ export function OnlineClassView() {
   const lastVideoSyncRef = useRef(0);
   const minRequired = classData?.slide_minimum_seconds ?? 30;
   const isVideoClass = classData?.online_content_type === 'video';
-  const isHistoricalSlide = progress && currentSlide < progress.current_slide;
+  const unlockedSlideCount = Number(progress?.current_slide || 0);
+  const isHistoricalSlide = unlockedSlideCount > 0 && currentSlide < unlockedSlideCount;
   const canAdvance = isHistoricalSlide || (elapsed >= minRequired && !advancing);
 
   // Timer: update elapsed time every second
@@ -164,7 +165,6 @@ export function OnlineClassView() {
         setStep('completed');
         setPresencePct(stateRes.presence_percentage);
       } else {
-        setCurrentSlide(stateRes.progress?.current_slide || 0);
         setStep('loading');
       }
     } catch (err: any) {
@@ -193,6 +193,8 @@ export function OnlineClassView() {
           if ((progress?.current_slide || 0) === 0 && !progress?.completed_at) {
             setStep('intro');
           } else {
+            const lastUnlockedSlide = Math.max(0, Math.min((progress?.current_slide || 1) - 1, pdf.numPages - 1));
+            setCurrentSlide(lastUnlockedSlide);
             setStep('viewing');
             startSlideTimer();
           }
@@ -330,7 +332,11 @@ export function OnlineClassView() {
   // Advance to next slide
   const handleAdvance = async () => {
     if (isHistoricalSlide) {
-      setCurrentSlide(prev => prev + 1);
+      const nextSlide = currentSlide + 1;
+      setCurrentSlide(nextSlide);
+      if (nextSlide >= unlockedSlideCount) {
+        startSlideTimer();
+      }
       setAdvanceError(null);
       return;
     }

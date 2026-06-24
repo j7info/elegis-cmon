@@ -37,6 +37,7 @@ export function CourseDetail() {
   const [editDuration, setEditDuration] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
+  const [editEnrollmentOpen, setEditEnrollmentOpen] = useState(true);
   const [isEditingCourse, setIsEditingCourse] = useState(false);
   const [showReuseModal, setShowReuseModal] = useState(false);
   const [reuseTitle, setReuseTitle] = useState('');
@@ -166,6 +167,14 @@ export function CourseDetail() {
             {courseData.parent_course_id && (
               <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Reaproveitado</span>
             )}
+            {!isStudent && (
+              <span className={clsx(
+                "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                courseData.enrollment_open !== false ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
+              )}>
+                {courseData.enrollment_open !== false ? 'Inscrições abertas' : 'Inscrições fechadas'}
+              </span>
+            )}
           </div>
           {courseData.description && <p className="text-gray-500 mt-3">{courseData.description}</p>}
         </div>
@@ -178,6 +187,7 @@ export function CourseDetail() {
                 setEditDuration(String(courseData.duration_hours || 0));
                 setEditStartDate(courseData.start_date ? format(new Date(courseData.start_date), 'yyyy-MM-dd') : '');
                 setEditEndDate(courseData.end_date ? format(new Date(courseData.end_date), 'yyyy-MM-dd') : '');
+                setEditEnrollmentOpen(courseData.enrollment_open !== false);
                 setShowEditCourse(true);
               }}
               className="px-4 py-2 bg-gray-50 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors border border-gray-200 flex items-center gap-2 whitespace-nowrap text-sm"
@@ -651,6 +661,7 @@ export function CourseDetail() {
                   duration_hours: parseInt(editDuration) || 0,
                   start_date: editStartDate || null,
                   end_date: editEndDate || null,
+                  enrollment_open: editEnrollmentOpen,
                 });
                 setCourseData(updated);
                 setShowEditCourse(false);
@@ -687,6 +698,18 @@ export function CourseDetail() {
                 <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} rows={3}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none resize-none" />
               </div>
+              <label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={editEnrollmentOpen}
+                  onChange={e => setEditEnrollmentOpen(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span>
+                  <span className="font-medium text-gray-900">Disponível para inscrição</span>
+                  <span className="block text-xs text-gray-500">Quando ativo, alunos ainda não matriculados verão este curso na dashboard.</span>
+                </span>
+              </label>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowEditCourse(false)}
                   className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium">Cancelar</button>

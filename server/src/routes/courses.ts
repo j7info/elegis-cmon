@@ -30,6 +30,10 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
   return studentRows.length > 0;
 }
 
+function studentIdentifiersCondition(alias: string) {
+  return `(${alias}.identifier = u.cpf OR ${alias}.identifier = u.email OR ${alias}.identifier = u.matricula)`;
+}
+
 // GET /api/courses — Listar cursos do usuário (owner ou adicional)
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -52,11 +56,17 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
-      `SELECT DISTINCT c.*
+      `SELECT DISTINCT
+         c.*,
+         CASE WHEN r.id IS NULL THEN 'available' ELSE 'enrolled' END AS enrollment_status,
+         r.status AS registration_status,
+         r.created_at AS registered_at
        FROM courses c
-       INNER JOIN registrations r ON r.course_id = c.id
        INNER JOIN app_users u ON u.id = $1
-       WHERE r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula
+       LEFT JOIN registrations r
+         ON r.course_id = c.id
+        AND ${studentIdentifiersCondition('r')}
+       WHERE r.id IS NOT NULL OR c.enrollment_open = TRUE
        ORDER BY c.created_at DESC`,
       [req.user!.id]
     );
@@ -69,7 +79,7 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
 
 // POST /api/courses — Criar curso
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, duration_hours, additional_teachers, start_date, end_date } = req.body;
+  const { title, description, duration_hours, additional_teachers, start_date, end_date, enrollment_open } = req.body;
 
   if (!title?.trim()) {
     res.status(400).json({ error: 'Título é obrigatório' });
@@ -80,9 +90,9 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
   try {
     await client.query('BEGIN');
     const { rows } = await client.query(
-      `INSERT INTO courses (title, description, duration_hours, owner_id, start_date, end_date)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title.trim(), description?.trim() || '', duration_hours || 0, req.user!.id, start_date || null, end_date || null]
+      `INSERT INTO courses (title, description, duration_hours, owner_id, start_date, end_date, enrollment_open)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [title.trim(), description?.trim() || '', duration_hours || 0, req.user!.id, start_date || null, end_date || null, enrollment_open !== false]
     );
     const newCourse = rows[0];
 
@@ -349,6 +359,19 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
   }
   const clean = normalizeIdentifier(identifier);
   try {
+    const { rows: courses } = await pool.query(
+      'SELECT id, enrollment_open FROM courses WHERE id = $1',
+      [req.params.id]
+    );
+    if (courses.length === 0) {
+      res.status(404).json({ error: 'Curso não encontrado' });
+      return;
+    }
+    if (!courses[0].enrollment_open) {
+      res.status(403).json({ error: 'Inscrições indisponíveis para este curso' });
+      return;
+    }
+
     // 1. Busca aluno (normaliza também o valor do banco)
     const { rows: users } = await pool.query(
       `SELECT id, name, cpf, email, departamento, cargo FROM app_users
@@ -362,7 +385,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
     const user = users[0];
 
     // 2. Registra com identificador normalizado
-    const storedIdentifier = normalizeIdentifier(user.cpf || user.email);
+    const storedIdentifier = normalizeIdentifier(user.cpf || user.email || user.matricula);
     await pool.query(
       `INSERT INTO registrations (course_id, identifier, full_name, role, department)
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (course_id, identifier) DO NOTHING`,
@@ -377,7 +400,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
 
 // PUT /api/courses/:id — Atualizar curso
 router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, duration_hours, certificate_config, additional_teachers, start_date, end_date } = req.body;
+  const { title, description, duration_hours, certificate_config, additional_teachers, start_date, end_date, enrollment_open } = req.body;
 
   const client = await pool.connect();
   try {
@@ -390,9 +413,10 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
         certificate_config = COALESCE($4, certificate_config),
         start_date = COALESCE($5, start_date),
         end_date = COALESCE($6, end_date),
+        enrollment_open = COALESCE($7, enrollment_open),
         updated_at = NOW()
-       WHERE id = $7 AND ($8 = TRUE OR owner_id = $9) RETURNING *`,
-      [title, description, duration_hours, certificate_config ? JSON.stringify(certificate_config) : null, start_date, end_date, req.params.id, isAdmin(req.user), req.user!.id]
+       WHERE id = $8 AND ($9 = TRUE OR owner_id = $10) RETURNING *`,
+      [title, description, duration_hours, certificate_config ? JSON.stringify(certificate_config) : null, start_date, end_date, typeof enrollment_open === 'boolean' ? enrollment_open : null, req.params.id, isAdmin(req.user), req.user!.id]
     );
 
     if (rows.length === 0) {
@@ -426,7 +450,7 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
 
 // POST /api/courses/:id/reuse — Reutilizar curso (cópia profunda)
 router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, start_date, end_date, duration_hours } = req.body;
+  const { title, description, start_date, end_date, duration_hours, enrollment_open } = req.body;
 
   if (!title?.trim()) {
     res.status(400).json({ error: 'Título é obrigatório' });
@@ -448,8 +472,8 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
 
     // 2. Cria novo curso
     const { rows: [newCourse] } = await client.query(
-      `INSERT INTO courses (title, description, duration_hours, owner_id, certificate_config, start_date, end_date, parent_course_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO courses (title, description, duration_hours, owner_id, certificate_config, start_date, end_date, parent_course_id, enrollment_open)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [
         title.trim(),
         description?.trim() || original.description || '',
@@ -459,6 +483,7 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
         start_date || null,
         end_date || null,
         original.id,
+        typeof enrollment_open === 'boolean' ? enrollment_open : original.enrollment_open !== false,
       ]
     );
 

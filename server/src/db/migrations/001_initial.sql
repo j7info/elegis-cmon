@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS courses (
   description TEXT,
   duration_hours INTEGER DEFAULT 0,
   owner_id INTEGER REFERENCES app_users(id),
+  enrollment_open BOOLEAN NOT NULL DEFAULT TRUE,
   certificate_config JSONB,                    -- {text, signatures[]}
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

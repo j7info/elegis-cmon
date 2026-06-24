@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth, AuthUser } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { Link } from 'react-router-dom';
-import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, Link as LinkIcon } from 'lucide-react';
+import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, Link as LinkIcon, UserPlus, CheckCircle2 } from 'lucide-react';
 import clsx from 'clsx';
 
 const canCreateCourse = (u: AuthUser | null) =>
@@ -23,6 +23,9 @@ export function Dashboard() {
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [newEnrollmentOpen, setNewEnrollmentOpen] = useState(true);
+  const [enrollingCourseId, setEnrollingCourseId] = useState<number | null>(null);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
 
   const loadData = async () => {
     if (!user) return;
@@ -54,6 +57,7 @@ export function Dashboard() {
     setSelectedCourseId(null);
     setStartDate('');
     setEndDate('');
+    setNewEnrollmentOpen(true);
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -70,6 +74,7 @@ export function Dashboard() {
           duration_hours: parseInt(durationHours) || 0,
           start_date: startDate || null,
           end_date: endDate || null,
+          enrollment_open: newEnrollmentOpen,
         });
       } else {
         await api.post('/courses', {
@@ -79,6 +84,7 @@ export function Dashboard() {
           additional_teachers: selectedTeachers,
           start_date: startDate || null,
           end_date: endDate || null,
+          enrollment_open: newEnrollmentOpen,
         });
       }
 
@@ -88,6 +94,7 @@ export function Dashboard() {
       setSelectedTeachers([]);
       setStartDate('');
       setEndDate('');
+      setNewEnrollmentOpen(true);
       setReuseMode('new');
       setSelectedCourseId(null);
       setIsModalOpen(false);
@@ -104,6 +111,22 @@ export function Dashboard() {
     setNewTitle(`${c.title} (nova turma)`);
     setNewDescription(c.description || '');
     setDurationHours(String(c.duration_hours || 0));
+    setNewEnrollmentOpen(c.enrollment_open !== false);
+  };
+
+  const handleEnroll = async (courseId: number) => {
+    if (!user) return;
+    setEnrollError(null);
+    setEnrollingCourseId(courseId);
+    try {
+      const identifier = user.cpf || user.email || user.matricula;
+      await api.post(`/courses/${courseId}/enroll`, { identifier });
+      await loadData();
+    } catch (err: any) {
+      setEnrollError(err?.message || 'Erro ao realizar inscrição');
+    } finally {
+      setEnrollingCourseId(null);
+    }
   };
 
   useEffect(() => {
@@ -129,6 +152,84 @@ export function Dashboard() {
 
   const showCreateButton = canCreateCourse(user);
   const isAluno = user.system_role === 'ALUNO';
+  const enrolledCourses = isAluno ? courses.filter(c => c.enrollment_status !== 'available') : courses;
+  const availableCourses = isAluno ? courses.filter(c => c.enrollment_status === 'available') : [];
+  const renderCourseCard = (c: any) => {
+    const status = !c.start_date ? null : c.end_date && new Date(c.end_date) < new Date() ? 'completed' : new Date(c.start_date) > new Date() ? 'upcoming' : 'active';
+    const isAvailable = isAluno && c.enrollment_status === 'available';
+    const card = (
+      <div className={clsx(
+        "bg-white p-6 rounded-xl shadow-sm border hover:shadow-md transition-all h-full flex flex-col",
+        isAvailable ? "border-blue-100 hover:border-blue-300" : "border-gray-100 hover:border-teal-300"
+      )}>
+        <div className="flex justify-between items-start mb-2">
+          <div className={clsx("p-2 rounded-lg", isAvailable ? "bg-blue-50 text-blue-600" : "bg-teal-50 text-teal-600")}>
+            <GraduationCap className="w-5 h-5" />
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end">
+            {isAvailable && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-700">
+                Disponível
+              </span>
+            )}
+            {status && (
+              <span className={clsx("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase", {
+                "bg-green-100 text-green-700": status === 'active',
+                "bg-amber-100 text-amber-700": status === 'upcoming',
+                "bg-gray-100 text-gray-500": status === 'completed',
+              })}>
+                {status === 'active' ? 'Em andamento' : status === 'upcoming' ? 'Previsto' : 'Concluído'}
+              </span>
+            )}
+          </div>
+        </div>
+        <h3 className={clsx("text-xl font-semibold text-gray-900 mb-1 truncate transition-colors", !isAvailable && "group-hover:text-teal-600")}>{c.title}</h3>
+        {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
+        {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
+        <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-50">
+          {!isAluno && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigator.clipboard.writeText(`${window.location.origin}/#/course-register/${c.id}`);
+                alert('Link de cadastro copiado!');
+              }}
+              className="text-teal-600 hover:text-teal-800 text-sm font-medium flex items-center gap-1 z-10 px-2 py-1 rounded hover:bg-teal-50 transition-colors"
+            >
+              <LinkIcon className="w-4 h-4" /> Copiar Link
+            </button>
+          )}
+          {isAvailable ? (
+            <button
+              type="button"
+              onClick={() => handleEnroll(c.id)}
+              disabled={enrollingCourseId === c.id}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {enrollingCourseId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              Inscrever-se
+            </button>
+          ) : (
+            <div className="text-teal-600 text-sm font-medium flex items-center gap-1 ml-auto">
+              Acessar Curso
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+
+    if (isAvailable) {
+      return <div key={c.id} className="block">{card}</div>;
+    }
+
+    return (
+      <Link key={c.id} to={`/course/${c.id}`} className="block group">
+        {card}
+      </Link>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -150,59 +251,59 @@ export function Dashboard() {
           )}
         </div>
 
+        {isAluno && enrollError && (
+          <div className="px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm">
+            {enrollError}
+          </div>
+        )}
+
         {courses.length === 0 ? (
           <div className="text-center p-12 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500">
             {isAluno
-              ? 'Você ainda não está matriculado em nenhum curso.'
+              ? 'Nenhum curso matriculado ou disponível para inscrição no momento.'
               : 'Você ainda não tem cursos. Clique em "Novo Curso" para criar.'}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {courses.map(c => {
-              const status = !c.start_date ? null : new Date(c.end_date) < new Date() ? 'completed' : new Date(c.start_date) > new Date() ? 'upcoming' : 'active';
-              return (
-                <Link key={c.id} to={`/course/${c.id}`} className="block group">
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all h-full flex flex-col">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="p-2 bg-teal-50 text-teal-600 rounded-lg">
-                        <GraduationCap className="w-5 h-5" />
-                      </div>
-                      {status && (
-                        <span className={clsx("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase", {
-                          "bg-green-100 text-green-700": status === 'active',
-                          "bg-amber-100 text-amber-700": status === 'upcoming',
-                          "bg-gray-100 text-gray-500": status === 'completed',
-                        })}>
-                          {status === 'active' ? 'Em andamento' : status === 'upcoming' ? 'Previsto' : 'Concluído'}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-1 truncate group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                    {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
-                    {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
-                    <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-50">
-                      {!isAluno && (
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            navigator.clipboard.writeText(`${window.location.origin}/#/course-register/${c.id}`);
-                            alert('Link de cadastro copiado!');
-                          }}
-                          className="text-teal-600 hover:text-teal-800 text-sm font-medium flex items-center gap-1 z-10 px-2 py-1 rounded hover:bg-teal-50 transition-colors"
-                        >
-                          <LinkIcon className="w-4 h-4" /> Copiar Link
-                        </button>
-                      )}
-                      <div className="text-teal-600 text-sm font-medium flex items-center gap-1 ml-auto">
-                        Acessar Curso
-                        <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                      </div>
-                    </div>
+          <div className="space-y-8">
+            {isAluno ? (
+              <>
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-teal-600" />
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Matriculados</h3>
                   </div>
-                </Link>
-              );
-            })}
+                  {enrolledCourses.length === 0 ? (
+                    <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl p-6">
+                      Você ainda não está matriculado em nenhum curso.
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {enrolledCourses.map(renderCourseCard)}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <UserPlus className="w-4 h-4 text-blue-600" />
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Disponíveis para inscrição</h3>
+                  </div>
+                  {availableCourses.length === 0 ? (
+                    <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl p-6">
+                      Nenhum curso disponível para inscrição agora.
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {availableCourses.map(renderCourseCard)}
+                    </div>
+                  )}
+                </section>
+              </>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {courses.map(renderCourseCard)}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -336,7 +437,8 @@ export function Dashboard() {
                     multiple
                     value={selectedTeachers.map(String)}
                     onChange={e => {
-                      const values = Array.from(e.target.selectedOptions, option => parseInt(option.value));
+                      const options = e.currentTarget.selectedOptions as HTMLCollectionOf<HTMLOptionElement>;
+                      const values = Array.from(options, option => parseInt(option.value));
                       setSelectedTeachers(values);
                     }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none h-24"
@@ -359,6 +461,19 @@ export function Dashboard() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all resize-none"
                 />
               </div>
+
+              <label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={newEnrollmentOpen}
+                  onChange={e => setNewEnrollmentOpen(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span>
+                  <span className="font-medium text-gray-900">Disponível para inscrição</span>
+                  <span className="block text-xs text-gray-500">Alunos verão este curso na dashboard quando ainda não estiverem matriculados.</span>
+                </span>
+              </label>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button

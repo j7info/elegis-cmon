@@ -116,6 +116,20 @@ export function RegisterCourse() {
                 </div>
               )}
             </div>
+          ) : courseData?.enrollment_open === false ? (
+            <div className="text-center">
+              <div className="w-16 h-16 bg-gray-100 text-gray-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Clock className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Inscrições indisponíveis</h3>
+              <p className="text-gray-600">Este curso não está aberto para novas inscrições no momento.</p>
+              <button
+                onClick={() => navigate('/')}
+                className="w-full mt-8 py-4 px-4 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl font-bold transition-colors"
+              >
+                Voltar para o Início
+              </button>
+            </div>
           ) : (
             <>
               {courseData?.description && (

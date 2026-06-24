@@ -9,7 +9,7 @@ router.get('/courses/:courseId', async (req: Request, res: Response) => {
   const { courseId } = req.params;
   try {
     const { rows } = await pool.query(
-      'SELECT id, title, description, start_date, end_date FROM courses WHERE id = $1',
+      'SELECT id, title, description, start_date, end_date, enrollment_open FROM courses WHERE id = $1',
       [courseId]
     );
     if (rows.length === 0) {
@@ -78,9 +78,13 @@ router.post('/courses/:courseId/registrations', async (req: Request, res: Respon
 
   try {
     // Validate course exists
-    const courseResult = await pool.query('SELECT id FROM courses WHERE id = $1', [courseId]);
+    const courseResult = await pool.query('SELECT id, enrollment_open FROM courses WHERE id = $1', [courseId]);
     if (courseResult.rows.length === 0) {
       res.status(404).json({ error: 'Curso não encontrado' });
+      return;
+    }
+    if (!courseResult.rows[0].enrollment_open) {
+      res.status(403).json({ error: 'Inscrições indisponíveis para este curso' });
       return;
     }
 

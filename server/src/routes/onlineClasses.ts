@@ -7,6 +7,55 @@ const router = Router();
 
 const VIDEO_COMPLETE_TOLERANCE_SECONDS = 3;
 
+function uniqueIdentifiers(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map(v => v?.trim()).filter((v): v is string => Boolean(v))));
+}
+
+async function resolveStudentIdentifiers(identifier: string): Promise<string[]> {
+  const raw = identifier.trim();
+  const clean = normalizeIdentifier(raw);
+  const rawLower = raw.toLowerCase();
+  const rawUpper = raw.toUpperCase();
+
+  const { rows } = await pool.query(
+    `SELECT cpf, email, matricula
+     FROM app_users
+     WHERE regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = $1
+        OR lower(COALESCE(email, '')) = $2
+        OR upper(COALESCE(matricula, '')) = $3
+        OR regexp_replace(COALESCE(matricula, ''), '\\D', '', 'g') = $1`,
+    [clean, rawLower, rawUpper]
+  );
+
+  return uniqueIdentifiers([
+    clean,
+    ...rows.flatMap((user: any) => [
+      user.cpf ? normalizeIdentifier(user.cpf) : null,
+      user.email ? normalizeIdentifier(user.email) : null,
+      user.matricula ? user.matricula.trim().toUpperCase() : null,
+      user.matricula ? normalizeIdentifier(user.matricula) : null,
+    ]),
+  ]);
+}
+
+async function findBestOnlineProgress(classId: string, identifiers: string[], forUpdate = false) {
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM class_online_progress
+     WHERE class_id = $1 AND identifier = ANY($2::text[])
+     ORDER BY
+       completed_at DESC NULLS LAST,
+       current_slide DESC,
+       COALESCE(max_video_position_seconds, 0) DESC,
+       total_time_spent_seconds DESC,
+       created_at DESC
+     LIMIT 1
+     ${forUpdate ? 'FOR UPDATE' : ''}`,
+    [classId, identifiers]
+  );
+  return rows[0] || null;
+}
+
 // POST /api/classes/:id/online/join — Aluno inicia/acessa aula online
 router.post('/:id/online/join', async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -17,9 +66,10 @@ router.post('/:id/online/join', async (req: Request, res: Response) => {
     return;
   }
 
-  const cleanIdentifier = normalizeIdentifier(identifier);
-
   try {
+    const identifiers = await resolveStudentIdentifiers(identifier);
+    const cleanIdentifier = identifiers[0] || normalizeIdentifier(identifier);
+
     // Verifica se a aula existe e é online
     const { rows: classes } = await pool.query(
       'SELECT id, type, presentation_url, expected_duration_minutes, slide_minimum_seconds, online_content_type, video_url, video_id, video_duration_seconds FROM classes WHERE id = $1',
@@ -46,7 +96,28 @@ router.post('/:id/online/join', async (req: Request, res: Response) => {
       return;
     }
 
-    // Cria ou retorna progresso existente
+    const existingProgress = await findBestOnlineProgress(id, identifiers);
+    if (existingProgress) {
+      const { rows: updated } = await pool.query(
+        `UPDATE class_online_progress
+         SET full_name = $1
+         WHERE id = $2
+         RETURNING *`,
+        [full_name.trim(), existingProgress.id]
+      );
+
+      res.json({
+        progress: updated[0],
+        class_id: cls.id,
+        expected_duration_minutes: cls.expected_duration_minutes,
+        slide_minimum_seconds: cls.slide_minimum_seconds,
+        online_content_type: cls.online_content_type,
+        video_id: cls.video_id,
+        video_duration_seconds: cls.video_duration_seconds,
+      });
+      return;
+    }
+
     const { rows: progress } = await pool.query(
       `INSERT INTO class_online_progress (class_id, identifier, full_name)
        VALUES ($1, $2, $3)
@@ -81,9 +152,9 @@ router.get('/:id/online/state', async (req: Request, res: Response) => {
     return;
   }
 
-  const cleanIdentifier = normalizeIdentifier(identifier);
-
   try {
+    const identifiers = await resolveStudentIdentifiers(identifier);
+
     const { rows: classes } = await pool.query(
       `SELECT id, type, title, description, status, presentation_url,
               expected_duration_minutes, slide_minimum_seconds,
@@ -98,10 +169,8 @@ router.get('/:id/online/state', async (req: Request, res: Response) => {
 
     const cls = classes[0];
 
-    const { rows: progress } = await pool.query(
-      'SELECT * FROM class_online_progress WHERE class_id = $1 AND identifier = $2',
-      [id, cleanIdentifier]
-    );
+    const bestProgress = await findBestOnlineProgress(id, identifiers);
+    const progress = bestProgress ? [bestProgress] : [];
 
     // Calcula presença
     let presence_percentage: number | null = null;
@@ -147,9 +216,9 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
 
   const currentSeconds = Math.max(0, Math.floor(Number(current_seconds) || 0));
   const durationSeconds = Math.max(0, Math.floor(Number(duration_seconds) || 0));
-  const cleanIdentifier = normalizeIdentifier(identifier);
-
   try {
+    const identifiers = await resolveStudentIdentifiers(identifier);
+
     const { rows: classes } = await pool.query(
       `SELECT id, online_content_type, video_duration_seconds
        FROM classes
@@ -181,6 +250,12 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
     const cappedPosition = knownDuration ? Math.min(currentSeconds, knownDuration) : currentSeconds;
     const isComplete = Boolean(knownDuration && cappedPosition >= Math.max(0, knownDuration - VIDEO_COMPLETE_TOLERANCE_SECONDS));
 
+    const existingProgress = await findBestOnlineProgress(id, identifiers);
+    if (!existingProgress) {
+      res.status(404).json({ error: 'Sessão não encontrada. Faça join primeiro.' });
+      return;
+    }
+
     const { rows } = await pool.query(
       `UPDATE class_online_progress
        SET max_video_position_seconds = GREATEST(max_video_position_seconds, $1::int),
@@ -191,9 +266,9 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
              WHEN $3::boolean = TRUE THEN NOW()
              ELSE completed_at
            END
-       WHERE class_id = $4 AND identifier = $5
+       WHERE id = $4
        RETURNING *`,
-      [cappedPosition, knownDuration, isComplete, id, cleanIdentifier]
+      [cappedPosition, knownDuration, isComplete, existingProgress.id]
     );
 
     if (rows.length === 0) {
@@ -223,13 +298,10 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
     return;
   }
 
-  const cleanIdentifier = normalizeIdentifier(identifier);
-
   try {
-    const { rows: progress } = await pool.query(
-      'SELECT * FROM class_online_progress WHERE class_id = $1 AND identifier = $2 FOR UPDATE',
-      [id, cleanIdentifier]
-    );
+    const identifiers = await resolveStudentIdentifiers(identifier);
+    const existingProgress = await findBestOnlineProgress(id, identifiers, true);
+    const progress = existingProgress ? [existingProgress] : [];
 
     if (progress.length === 0) {
       res.status(404).json({ error: 'Sessão não encontrada. Faça join primeiro.' });
@@ -299,9 +371,9 @@ router.post('/:id/online/complete', async (req: Request, res: Response) => {
     return;
   }
 
-  const cleanIdentifier = normalizeIdentifier(identifier);
-
   try {
+    const identifiers = await resolveStudentIdentifiers(identifier);
+
     const { rows: classes } = await pool.query(
       'SELECT online_content_type, video_duration_seconds, expected_duration_minutes FROM classes WHERE id = $1',
       [id]
@@ -313,11 +385,7 @@ router.post('/:id/online/complete', async (req: Request, res: Response) => {
     }
 
     if (classes[0].online_content_type === 'video') {
-      const { rows: current } = await pool.query(
-        'SELECT * FROM class_online_progress WHERE class_id = $1 AND identifier = $2',
-        [id, cleanIdentifier]
-      );
-      const prog = current[0];
+      const prog = await findBestOnlineProgress(id, identifiers);
       const duration = prog?.video_duration_seconds || classes[0].video_duration_seconds || 0;
       if (!prog || !duration || prog.max_video_position_seconds < Math.max(0, duration - VIDEO_COMPLETE_TOLERANCE_SECONDS)) {
         res.status(400).json({ error: 'Assista ao vídeo completo antes de concluir a aula' });
@@ -325,20 +393,30 @@ router.post('/:id/online/complete', async (req: Request, res: Response) => {
       }
     }
 
-    const updateSql = classes[0].online_content_type === 'video'
+    const existingProgress = await findBestOnlineProgress(id, identifiers);
+    if (!existingProgress) {
+      res.status(404).json({ error: 'Sessão não encontrada ou já concluída' });
+      return;
+    }
+
+    const updateParams = classes[0].online_content_type === 'video'
+      ? [existingProgress.id, classes[0].video_duration_seconds || 0]
+      : [existingProgress.id];
+
+    const updateByIdSql = classes[0].online_content_type === 'video'
       ? `UPDATE class_online_progress
          SET completed_at = COALESCE(completed_at, NOW()),
-             total_time_spent_seconds = GREATEST(total_time_spent_seconds, COALESCE(video_duration_seconds, $3))
-         WHERE class_id = $1 AND identifier = $2
+             total_time_spent_seconds = GREATEST(total_time_spent_seconds, COALESCE(video_duration_seconds, $2))
+         WHERE id = $1
          RETURNING *`
       : `UPDATE class_online_progress
          SET completed_at = NOW(),
              total_time_spent_seconds = total_time_spent_seconds +
                EXTRACT(EPOCH FROM (NOW() - slide_started_at))::int
-         WHERE class_id = $1 AND identifier = $2 AND completed_at IS NULL
+         WHERE id = $1 AND completed_at IS NULL
          RETURNING *`;
 
-    const { rows: progress } = await pool.query(updateSql, [id, cleanIdentifier, classes[0].video_duration_seconds || 0]);
+    const { rows: progress } = await pool.query(updateByIdSql, updateParams);
 
     if (progress.length === 0) {
       res.status(404).json({ error: 'Sessão não encontrada ou já concluída' });

@@ -140,6 +140,8 @@ export function OnlineClassView() {
         identifier: identifier.trim(),
         full_name: fullName.trim(),
       });
+      const progressIdentifier = res.progress?.identifier || identifier.trim();
+      setIdentifier(progressIdentifier);
       setProgress(res.progress);
       setClassData({
         expected_duration_minutes: res.expected_duration_minutes,
@@ -151,7 +153,7 @@ export function OnlineClassView() {
       });
 
       // Load class data
-      const stateRes = await api.get(`/classes/${classId}/online/state?identifier=${encodeURIComponent(identifier.trim())}`);
+      const stateRes = await api.get(`/classes/${classId}/online/state?identifier=${encodeURIComponent(progressIdentifier)}`);
       setClassData(stateRes.class);
       setProgress(stateRes.progress);
       setPresencePct(stateRes.presence_percentage);

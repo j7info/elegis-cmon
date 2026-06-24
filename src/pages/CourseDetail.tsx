@@ -12,6 +12,7 @@ export function CourseDetail() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [courseData, setCourseData] = useState<any>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [classes, setClasses] = useState<any[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -52,6 +53,7 @@ export function CourseDetail() {
 
   const loadData = async () => {
     if (!courseId) return;
+    setLoadError(null);
     try {
       const promises: Promise<any>[] = [
         api.get(`/courses/${courseId}`),
@@ -81,6 +83,7 @@ export function CourseDetail() {
       }
     } catch (err) {
       console.error('Error loading course:', err);
+      setLoadError(err instanceof Error ? err.message : 'Erro ao carregar curso');
     }
   };
 
@@ -204,7 +207,26 @@ export function CourseDetail() {
     }
   };
 
-  if (!courseData) return <div className="p-8 text-center text-gray-500">Carregando curso...</div>;
+  if (!courseData) {
+    return (
+      <div className="p-8 text-center">
+        {loadError ? (
+          <div className="inline-flex flex-col items-center gap-4 rounded-lg border border-red-200 bg-red-50 px-6 py-5 text-red-700">
+            <div className="font-medium">{loadError}</div>
+            <button
+              type="button"
+              onClick={loadData}
+              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : (
+          <div className="text-gray-500">Carregando curso...</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

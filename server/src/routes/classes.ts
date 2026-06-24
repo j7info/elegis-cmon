@@ -7,6 +7,16 @@ import { upload, UPLOAD_DIR } from '../middleware/upload.js';
 
 const router = Router();
 
+function studentIdentifiersCondition(alias: string) {
+  return `(
+    ${alias}.identifier = u.cpf
+    OR ${alias}.identifier = regexp_replace(COALESCE(u.cpf, ''), '\\D', '', 'g')
+    OR lower(${alias}.identifier) = lower(COALESCE(u.email, ''))
+    OR ${alias}.identifier = u.matricula
+    OR ${alias}.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+  )`;
+}
+
 function parseYouTubeVideoId(url: string | undefined | null): string | null {
   if (!url?.trim()) return null;
   const rawValue = url.trim();
@@ -43,12 +53,7 @@ async function userCanAccessCourse(courseId: string | number, userId: number, ro
   const { rows: studentRows } = await pool.query(
     `SELECT 1
      FROM registrations r
-     INNER JOIN app_users u ON (
-       r.identifier = u.cpf
-       OR r.identifier = u.email
-       OR r.identifier = u.matricula
-       OR r.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
-     )
+     INNER JOIN app_users u ON ${studentIdentifiersCondition('r')}
      WHERE r.course_id = $1 AND u.id = $2
      LIMIT 1`,
     [courseId, userId]
@@ -65,12 +70,7 @@ async function userCanAccessClass(classId: string, userId: number, role: string)
      LEFT JOIN app_users u ON u.id = $3
      LEFT JOIN registrations r
        ON r.course_id = c.id
-      AND (
-        r.identifier = u.cpf
-        OR r.identifier = u.email
-        OR r.identifier = u.matricula
-        OR r.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
-      )
+      AND ${studentIdentifiersCondition('r')}
      WHERE cl.id = $1
        AND ($2 = 'ADMIN' OR cl.owner_id = $3 OR cl.auxiliary_teacher_id = $3 OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL)
      LIMIT 1`,

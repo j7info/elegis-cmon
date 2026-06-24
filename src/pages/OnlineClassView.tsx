@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import * as pdfjsLib from 'pdfjs-dist';
-import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award, RotateCcw, Play, Pause, Video } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../lib/AuthContext';
 
@@ -12,8 +12,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(safeSeconds / 60);
+  const s = safeSeconds % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
@@ -68,9 +69,18 @@ export function OnlineClassView() {
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [videoPlayer, setVideoPlayer] = useState<any>(null);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoMaxWatched, setVideoMaxWatched] = useState(0);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const youtubeRef = useRef<HTMLDivElement>(null);
+  const lastVideoSyncRef = useRef(0);
   const minRequired = classData?.slide_minimum_seconds ?? 30;
+  const isVideoClass = classData?.online_content_type === 'video';
   const isHistoricalSlide = progress && currentSlide < progress.current_slide;
   const canAdvance = isHistoricalSlide || (elapsed >= minRequired && !advancing);
 
@@ -134,6 +144,9 @@ export function OnlineClassView() {
       setClassData({
         expected_duration_minutes: res.expected_duration_minutes,
         slide_minimum_seconds: res.slide_minimum_seconds,
+        online_content_type: res.online_content_type,
+        video_id: res.video_id,
+        video_duration_seconds: res.video_duration_seconds,
         presentation_url: null, // Will load below
       });
 
@@ -142,6 +155,8 @@ export function OnlineClassView() {
       setClassData(stateRes.class);
       setProgress(stateRes.progress);
       setPresencePct(stateRes.presence_percentage);
+      setVideoMaxWatched(stateRes.progress?.max_video_position_seconds || 0);
+      setVideoDuration(stateRes.class?.video_duration_seconds || stateRes.progress?.video_duration_seconds || 0);
 
       if (stateRes.progress?.completed_at) {
         setStep('completed');
@@ -159,6 +174,11 @@ export function OnlineClassView() {
 
   // After loading slide count, start viewing
   useEffect(() => {
+    if (step === 'loading' && isVideoClass && classData?.video_id) {
+      setStep(progress?.max_video_position_seconds ? 'viewing' : 'intro');
+      return;
+    }
+
     if (step === 'loading' && classData?.presentation_url) {
       const loadPdf = async () => {
         try {
@@ -180,7 +200,121 @@ export function OnlineClassView() {
       };
       loadPdf();
     }
-  }, [step, classData?.presentation_url, progress]);
+  }, [step, classData?.presentation_url, classData?.video_id, isVideoClass, progress]);
+
+  useEffect(() => {
+    if (step !== 'viewing' || !isVideoClass || !classData?.video_id || !youtubeRef.current) return;
+
+    let cancelled = false;
+
+    const createPlayer = () => {
+      if (cancelled || !youtubeRef.current || !(window as any).YT?.Player) return;
+      const player = new (window as any).YT.Player(youtubeRef.current, {
+        width: '100%',
+        height: '100%',
+        videoId: classData.video_id,
+        playerVars: {
+          controls: 0,
+          disablekb: 1,
+          modestbranding: 1,
+          rel: 0,
+          playsinline: 1,
+        },
+        events: {
+          onReady: (event: any) => {
+            const duration = Math.floor(event.target.getDuration() || classData.video_duration_seconds || 0);
+            setVideoDuration(duration);
+            setVideoReady(true);
+            if (progress?.completed_at) {
+              event.target.seekTo(0, true);
+            } else if ((progress?.max_video_position_seconds || 0) > 0) {
+              event.target.seekTo(progress.max_video_position_seconds, true);
+            }
+          },
+          onStateChange: (event: any) => {
+            setVideoPlaying(event.data === (window as any).YT.PlayerState.PLAYING);
+          },
+        },
+      });
+      setVideoPlayer(player);
+    };
+
+    if ((window as any).YT?.Player) {
+      createPlayer();
+    } else {
+      const existing = document.querySelector<HTMLScriptElement>('script[src="https://www.youtube.com/iframe_api"]');
+      if (!existing) {
+        const script = document.createElement('script');
+        script.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(script);
+      }
+      const previous = (window as any).onYouTubeIframeAPIReady;
+      (window as any).onYouTubeIframeAPIReady = () => {
+        previous?.();
+        createPlayer();
+      };
+    }
+
+    return () => {
+      cancelled = true;
+      setVideoReady(false);
+      setVideoPlaying(false);
+      setVideoPlayer((player: any) => {
+        try { player?.destroy?.(); } catch {}
+        return null;
+      });
+    };
+  }, [step, isVideoClass, classData?.video_id]);
+
+  const syncVideoProgress = useCallback(async (current: number, duration: number) => {
+    if (!classId || !identifier.trim()) return;
+    try {
+      const res = await api.post(`/classes/${classId}/online/video-progress`, {
+        identifier: identifier.trim(),
+        current_seconds: Math.floor(current),
+        duration_seconds: Math.floor(duration),
+      });
+      setProgress(res.progress);
+      if (res.progress?.completed_at) {
+        setPresencePct(100);
+        setVideoMaxWatched(res.progress.max_video_position_seconds || Math.floor(current));
+      }
+    } catch (err) {
+      console.error('Video progress sync error:', err);
+    }
+  }, [classId, identifier]);
+
+  useEffect(() => {
+    if (step !== 'viewing' || !isVideoClass || !videoPlayer || !videoReady) return;
+
+    const interval = setInterval(() => {
+      const current = Math.floor(videoPlayer.getCurrentTime?.() || 0);
+      const duration = Math.floor(videoPlayer.getDuration?.() || videoDuration || classData?.video_duration_seconds || 0);
+      const completed = Boolean(progress?.completed_at);
+      const allowed = completed ? duration : videoMaxWatched + 4;
+
+      if (!completed && current > allowed) {
+        videoPlayer.seekTo(videoMaxWatched, true);
+        setVideoCurrentTime(videoMaxWatched);
+        return;
+      }
+
+      setVideoCurrentTime(current);
+      if (duration > 0) setVideoDuration(duration);
+
+      const nextMax = completed ? Math.max(videoMaxWatched, current) : Math.max(videoMaxWatched, current);
+      if (nextMax !== videoMaxWatched) setVideoMaxWatched(nextMax);
+
+      const now = Date.now();
+      const reachedEnd = duration > 0 && nextMax >= Math.max(0, duration - 3);
+      if (now - lastVideoSyncRef.current > 5000 || reachedEnd) {
+        lastVideoSyncRef.current = now;
+        syncVideoProgress(nextMax, duration);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [step, isVideoClass, videoPlayer, videoReady, videoDuration, videoMaxWatched, progress?.completed_at, classData?.video_duration_seconds, syncVideoProgress]);
 
   // Go to previous slide
   const handleBack = () => {
@@ -237,6 +371,25 @@ export function OnlineClassView() {
       setStep('completed');
     } catch (err: any) {
       setAdvanceError(err?.response?.data?.error || 'Erro ao concluir');
+    }
+  };
+
+  const seekVideoBy = (seconds: number) => {
+    if (!videoPlayer) return;
+    const duration = videoDuration || videoPlayer.getDuration?.() || 0;
+    const current = videoPlayer.getCurrentTime?.() || 0;
+    const maxAllowed = progress?.completed_at ? duration : videoMaxWatched;
+    const next = Math.max(0, Math.min(current + seconds, maxAllowed));
+    videoPlayer.seekTo(next, true);
+    setVideoCurrentTime(Math.floor(next));
+  };
+
+  const toggleVideoPlayback = () => {
+    if (!videoPlayer) return;
+    if (videoPlaying) {
+      videoPlayer.pauseVideo();
+    } else {
+      videoPlayer.playVideo();
     }
   };
 
@@ -386,26 +539,49 @@ export function OnlineClassView() {
       <main key="intro" className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
           <div className="bg-teal-600 p-8 text-white text-center">
-            <BookOpen className="w-12 h-12 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold">Como funciona a Aula Online</h2>
+            {isVideoClass ? <Video className="w-12 h-12 mx-auto mb-4" /> : <BookOpen className="w-12 h-12 mx-auto mb-4" />}
+            <h2 className="text-2xl font-bold">{isVideoClass ? 'Como funciona a Aula em Vídeo' : 'Como funciona a Aula Online'}</h2>
           </div>
           <div className="p-8 space-y-5 text-gray-600">
-            <div className="flex gap-3">
-              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">1</div>
-              <p>Leia atentamente o conteúdo de cada slide da apresentação.</p>
-            </div>
-            <div className="flex gap-3">
-              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">2</div>
-              <p>Você precisará permanecer um <strong>tempo mínimo</strong> em cada slide (indicado no topo da tela).</p>
-            </div>
-            <div className="flex gap-3">
-              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">3</div>
-              <p>O botão de <strong>Avançar</strong> será liberado assim que esse tempo mínimo for atingido.</p>
-            </div>
-            <div className="flex gap-3">
-              <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">4</div>
-              <p>Você pode usar o botão <strong>Voltar</strong> a qualquer momento para revisar slides anteriores.</p>
-            </div>
+            {isVideoClass ? (
+              <>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">1</div>
+                  <p>Assista ao vídeo completo para registrar a conclusão da aula.</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">2</div>
+                  <p>O sistema mostra o tempo assistido e quanto falta para terminar.</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">3</div>
+                  <p>Você pode voltar 10 ou 30 segundos para revisar, mas só avança até o trecho já assistido.</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">4</div>
+                  <p>Se houver avaliação, ela será liberada depois que o vídeo for assistido por completo ao menos uma vez.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">1</div>
+                  <p>Leia atentamente o conteúdo de cada slide da apresentação.</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">2</div>
+                  <p>Você precisará permanecer um <strong>tempo mínimo</strong> em cada slide (indicado no topo da tela).</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">3</div>
+                  <p>O botão de <strong>Avançar</strong> será liberado assim que esse tempo mínimo for atingido.</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">4</div>
+                  <p>Você pode usar o botão <strong>Voltar</strong> a qualquer momento para revisar slides anteriores.</p>
+                </div>
+              </>
+            )}
             
             <button
               onClick={() => {
@@ -430,7 +606,9 @@ export function OnlineClassView() {
           <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-8 text-white">
             <CheckCircle2 className="w-16 h-16 mx-auto mb-3" />
             <h1 className="text-2xl font-bold">Aula Concluída!</h1>
-            <p className="text-green-100 mt-1">Você finalizou a leitura dos slides.</p>
+              <p className="text-green-100 mt-1">
+                {isVideoClass ? 'Você assistiu ao vídeo completo.' : 'Você finalizou a leitura dos slides.'}
+              </p>
           </div>
 
           <div className="p-6 space-y-4">
@@ -459,6 +637,15 @@ export function OnlineClassView() {
                 Tempo total: {progress ? formatTime(progress.total_time_spent_seconds) : '0:00'} · Esperado: {classData?.expected_duration_minutes || '?'} min
               </p>
             </div>
+
+            {isVideoClass && (
+              <button
+                onClick={() => setStep('viewing')}
+                className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-5 h-5" /> Rever vídeo
+              </button>
+            )}
 
             {canAccessEval && (
               <>
@@ -614,6 +801,105 @@ export function OnlineClassView() {
             )}
           </div>
         </div>
+      </main>
+    );
+  }
+
+  if (isVideoClass) {
+    const duration = videoDuration || classData?.video_duration_seconds || 0;
+    const remaining = Math.max(0, duration - videoMaxWatched);
+    const videoPct = duration > 0 ? Math.min(100, Math.round((videoMaxWatched / duration) * 100)) : 0;
+    const completed = Boolean(progress?.completed_at);
+
+    return (
+      <main key="video-viewing" className="min-h-screen bg-gray-950 flex flex-col">
+        <header className="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <Video className="w-5 h-5 text-rose-400 flex-shrink-0" />
+            <span className="text-sm font-medium text-gray-200 truncate max-w-[420px]">
+              {classData?.title || 'Aula em Vídeo'}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-gray-400">
+            {completed ? (
+              <span className="text-green-400 font-bold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Concluído
+              </span>
+            ) : (
+              <span className="font-mono">
+                {formatTime(videoMaxWatched)} / {duration ? formatTime(duration) : '--:--'}
+              </span>
+            )}
+          </div>
+        </header>
+
+        <section className="flex-1 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl relative">
+            {!videoReady && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                <Loader2 className="w-8 h-8 animate-spin" />
+              </div>
+            )}
+            <div ref={youtubeRef} className="w-full h-full" />
+          </div>
+        </section>
+
+        <footer className="bg-gray-900 border-t border-gray-800 px-4 py-4 flex-shrink-0">
+          <div className="max-w-5xl mx-auto space-y-3">
+            <div>
+              <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                <div className="h-full bg-rose-500 rounded-full transition-all duration-300" style={{ width: `${videoPct}%` }} />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+                <span>Assistido: {formatTime(videoMaxWatched)}</span>
+                <span>{completed ? 'Você pode rever o vídeo livremente.' : `Faltam ${duration ? formatTime(remaining) : '--:--'}`}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => seekVideoBy(-30)}
+                  disabled={!videoReady}
+                  className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-100 font-bold text-sm flex items-center gap-2 transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4" /> 30s
+                </button>
+                <button
+                  onClick={() => seekVideoBy(-10)}
+                  disabled={!videoReady}
+                  className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-100 font-bold text-sm flex items-center gap-2 transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4" /> 10s
+                </button>
+              </div>
+
+              <button
+                onClick={toggleVideoPlayback}
+                disabled={!videoReady}
+                className="px-6 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 transition-colors"
+              >
+                {videoPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {videoPlaying ? 'Pausar' : 'Reproduzir'}
+              </button>
+
+              <div className="flex items-center justify-end min-w-[160px]">
+                {completed ? (
+                  <button
+                    onClick={() => setStep('completed')}
+                    className="px-5 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 text-white font-bold text-sm flex items-center gap-2 transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Continuar
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-500 text-right">
+                    A conclusão aparece automaticamente no fim.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </footer>
       </main>
     );
   }

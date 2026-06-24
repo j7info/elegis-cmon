@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -52,8 +52,10 @@ export function ClassDetail() {
 
   // Online class settings
   const [editType, setEditType] = useState<'presential' | 'online'>('presential');
+  const [editOnlineContentType, setEditOnlineContentType] = useState<'slides' | 'video'>('slides');
   const [editExpectedDuration, setEditExpectedDuration] = useState('30');
   const [editSlideMinSeconds, setEditSlideMinSeconds] = useState('30');
+  const [editVideoUrl, setEditVideoUrl] = useState('');
 
   // Evaluation state
   const [evaluations, setEvaluations] = useState<any[]>([]);
@@ -208,8 +210,10 @@ export function ClassDetail() {
     setRemovePdf(false);
     setIsEditingClass(true);
     setEditType(classData.type || 'presential');
+    setEditOnlineContentType(classData.online_content_type || 'slides');
     setEditExpectedDuration(String(classData.expected_duration_minutes ?? 30));
     setEditSlideMinSeconds(String(classData.slide_minimum_seconds ?? 30));
+    setEditVideoUrl(classData.video_url || '');
     
     // Load users if empty
     if (allUsers.length === 0) {
@@ -233,8 +237,10 @@ export function ClassDetail() {
         date: combinedDate,
         auxiliary_teacher_id: editAuxTeacherId ? parseInt(editAuxTeacherId) : null,
         type: editType,
+        online_content_type: editType === 'online' ? editOnlineContentType : 'slides',
+        video_url: editType === 'online' && editOnlineContentType === 'video' ? editVideoUrl.trim() : null,
         expected_duration_minutes: editType === 'online' ? (parseInt(editExpectedDuration) || 30) : null,
-        slide_minimum_seconds: editType === 'online' ? (parseInt(editSlideMinSeconds) || 30) : null,
+        slide_minimum_seconds: editType === 'online' && editOnlineContentType === 'slides' ? (parseInt(editSlideMinSeconds) || 30) : null,
       });
       // Remove o PDF ou arquivo interativo se solicitado
       if (removePdf) {
@@ -246,7 +252,7 @@ export function ClassDetail() {
       }
 
       // Anexa/substitui o PDF ou ZIP, se um novo foi selecionado
-      if (editPdfFile) {
+      if (editPdfFile && editOnlineContentType !== 'video') {
         const fd = new FormData();
         fd.append('file', editPdfFile);
         if (classData.is_interactive) {
@@ -776,10 +782,13 @@ export function ClassDetail() {
         <div className="bg-blue-50 border border-blue-100 p-6 rounded-xl text-blue-800 flex flex-col items-center justify-center text-center">
           <BookOpen className="w-10 h-10 text-blue-400 mb-3" />
           <h3 className="text-lg font-bold mb-1">Aula online agendada</h3>
-          <p className="text-blue-600 mb-2">Após iniciar a aula, os alunos poderão acessar os slides remotamente.</p>
+          <p className="text-blue-600 mb-2">
+            Após iniciar a aula, os alunos poderão acessar {classData.online_content_type === 'video' ? 'o vídeo' : 'os slides'} remotamente.
+          </p>
           <p className="text-xs text-blue-500 mb-6">
-            Tempo esperado: {classData.expected_duration_minutes || 30} min · {' '}
-            Mínimo por slide: {classData.slide_minimum_seconds || 30}s
+            {classData.online_content_type === 'video'
+              ? `Duração: ${classData.video_duration_seconds ? formatDuration(classData.video_duration_seconds) : 'será detectada no primeiro acesso'}`
+              : `Tempo esperado: ${classData.expected_duration_minutes || 30} min · Mínimo por slide: ${classData.slide_minimum_seconds || 30}s`}
           </p>
         </div>
       )}
@@ -826,11 +835,12 @@ export function ClassDetail() {
             <h3 className="font-semibold text-teal-800">Aula Online disponível</h3>
           </div>
           <p className="text-sm text-teal-600 mb-4">
-            Compartilhe o link abaixo com os alunos. Eles acessarão os slides diretamente no navegador.
+            Compartilhe o link abaixo com os alunos. Eles acessarão {classData.online_content_type === 'video' ? 'o vídeo' : 'os slides'} diretamente no navegador.
           </p>
           <p className="text-xs text-teal-500 mb-3">
-            Presença calculada por tempo de leitura · Esperado: {classData.expected_duration_minutes || 30} min · {' '}
-            Mínimo por slide: {classData.slide_minimum_seconds || 30}s
+            {classData.online_content_type === 'video'
+              ? `Presença calculada pelo vídeo completo · Duração: ${classData.video_duration_seconds ? formatDuration(classData.video_duration_seconds) : 'aguardando leitura do YouTube'}`
+              : `Presença calculada por tempo de leitura · Esperado: ${classData.expected_duration_minutes || 30} min · Mínimo por slide: ${classData.slide_minimum_seconds || 30}s`}
           </p>
           <div className="flex bg-white rounded-lg border border-teal-200 overflow-hidden shadow-sm">
             <input
@@ -886,7 +896,7 @@ export function ClassDetail() {
                 <th className="px-4 py-3 text-gray-700">Nome</th>
                 <th className="px-4 py-3 text-gray-700">Identificação</th>
                 <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Acesso' : `Início (${pStart})`}</th>
-                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Slides' : `Meio (${pMiddle})`}</th>
+                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? (classData.online_content_type === 'video' ? 'Vídeo' : 'Slides') : `Meio (${pMiddle})`}</th>
                 <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Tempo' : `Fim (${pEnd})`}</th>
                 <th className="px-4 py-3 text-gray-700 text-center font-bold">{isOnlineClass ? 'Presença' : 'Total'}</th>
                 <th className="px-4 py-3 text-gray-700 text-center">Avaliação</th>
@@ -952,11 +962,11 @@ export function ClassDetail() {
                       <td className="px-4 py-3 text-center">
                         {isOnlineClass && att?.completed_at ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
-                            <BookOpen className="w-3 h-3" /> Slides concluídos
+                            <BookOpen className="w-3 h-3" /> {classData.online_content_type === 'video' ? 'Vídeo concluído' : 'Slides concluídos'}
                           </span>
                         ) : isOnlineClass && att ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                            <Clock className="w-3 h-3" /> Em leitura
+                            <Clock className="w-3 h-3" /> {classData.online_content_type === 'video' ? 'Assistindo' : 'Em leitura'}
                           </span>
                         ) : isOnlineClass ? (
                           <span className="text-gray-300">Aguardando</span>
@@ -1297,7 +1307,53 @@ export function ClassDetail() {
               </div>
 
               {editType === 'online' && (
-                <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                <div className="space-y-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <div>
+                    <label className="block text-sm font-medium text-blue-800 mb-2">Conteúdo online</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditOnlineContentType('slides')}
+                        className={clsx(
+                          'px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                          editOnlineContentType === 'slides'
+                            ? 'border-blue-500 bg-white text-blue-700'
+                            : 'border-blue-100 bg-white/70 text-blue-500 hover:border-blue-200'
+                        )}
+                      >
+                        Slides/PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditOnlineContentType('video')}
+                        className={clsx(
+                          'px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                          editOnlineContentType === 'video'
+                            ? 'border-rose-500 bg-white text-rose-700'
+                            : 'border-blue-100 bg-white/70 text-blue-500 hover:border-blue-200'
+                        )}
+                      >
+                        Vídeo
+                      </button>
+                    </div>
+                  </div>
+                  {editOnlineContentType === 'video' ? (
+                    <div>
+                      <label className="block text-sm font-medium text-blue-800 mb-1">URL do YouTube</label>
+                      <div className="flex items-center gap-2">
+                        <Video className="w-5 h-5 text-rose-500 flex-shrink-0" />
+                        <input
+                          type="url"
+                          value={editVideoUrl}
+                          onChange={e => setEditVideoUrl(e.target.value)}
+                          className="w-full px-4 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white"
+                          placeholder="https://www.youtube.com/watch?v=..."
+                          required
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-blue-800 mb-1">Tempo esperado total</label>
                     <div className="flex items-center gap-2">
@@ -1328,6 +1384,8 @@ export function ClassDetail() {
                     </div>
                     <p className="text-xs text-blue-500 mt-1">Mínimo antes de avançar ao próximo slide</p>
                   </div>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -1377,6 +1435,7 @@ export function ClassDetail() {
                 </select>
               </div>
 
+              {editOnlineContentType !== 'video' && (
               <div>
                 <label className="text-sm font-medium text-gray-700">
                   {classData.is_interactive ? 'Arquivo da Aula Interativa (.ZIP)' : 'PDF de Apresentação'}
@@ -1414,6 +1473,7 @@ export function ClassDetail() {
                   </button>
                 )}
               </div>
+              )}
 
               <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsEditingClass(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">

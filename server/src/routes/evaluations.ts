@@ -1060,7 +1060,7 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
 
     // Verifica se a avaliação existe e é online
     const { rows: evals } = await client.query(
-      `SELECT e.*, cl.type AS class_type, cl.expected_duration_minutes
+      `SELECT e.*, cl.type AS class_type, cl.expected_duration_minutes, cl.online_content_type
        FROM evaluations e
        JOIN classes cl ON e.class_id = cl.id
        WHERE e.id = $1`,
@@ -1087,13 +1087,15 @@ router.post('/evaluations/:id/online/start', async (req: Request, res: Response)
 
     if (progress.length === 0) {
       await client.query('ROLLBACK');
-      res.status(403).json({ error: 'Conclua a leitura dos slides antes de fazer a avaliação' });
+      res.status(403).json({ error: evaluation.online_content_type === 'video' ? 'Assista ao vídeo completo antes de fazer a avaliação' : 'Conclua a leitura dos slides antes de fazer a avaliação' });
       return;
     }
 
     const prog = progress[0];
     const expectedMin = evaluation.expected_duration_minutes || 30;
-    const presencePct = Math.min(100, Math.round((prog.total_time_spent_seconds / 60 / expectedMin) * 100));
+    const presencePct = evaluation.online_content_type === 'video'
+      ? 100
+      : Math.min(100, Math.round((prog.total_time_spent_seconds / 60 / expectedMin) * 100));
 
     if (presencePct < 60) {
       await client.query('ROLLBACK');

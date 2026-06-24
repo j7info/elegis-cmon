@@ -7,6 +7,23 @@ import { upload, UPLOAD_DIR } from '../middleware/upload.js';
 
 const router = Router();
 
+function parseYouTubeVideoId(url: string | undefined | null): string | null {
+  if (!url?.trim()) return null;
+  try {
+    const parsed = new URL(url.trim());
+    if (parsed.hostname === 'youtu.be') return parsed.pathname.split('/').filter(Boolean)[0] || null;
+    if (parsed.hostname.includes('youtube.com')) {
+      if (parsed.pathname.startsWith('/shorts/') || parsed.pathname.startsWith('/embed/')) {
+        return parsed.pathname.split('/').filter(Boolean)[1] || null;
+      }
+      return parsed.searchParams.get('v');
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 async function userCanAccessCourse(courseId: string | number, userId: number, role: string): Promise<boolean> {
   if (role === 'ADMIN') return true;
 
@@ -76,7 +93,7 @@ router.get('/course/:courseId', authMiddleware, async (req: AuthRequest, res: Re
 
 // POST /api/classes — Criar aula
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { course_id, title, description, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end, type, is_interactive, expected_duration_minutes, slide_minimum_seconds } = req.body;
+  const { course_id, title, description, date, qr_duration_minutes, auxiliary_teacher_id, points_start, points_middle, points_end, type, is_interactive, expected_duration_minutes, slide_minimum_seconds, online_content_type, video_url, video_duration_seconds } = req.body;
 
   if (!course_id || !title?.trim()) {
     res.status(400).json({ error: 'course_id e title são obrigatórios' });
@@ -90,13 +107,21 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
       return;
     }
 
+    const contentType = online_content_type === 'video' ? 'video' : 'slides';
+    const videoId = contentType === 'video' ? parseYouTubeVideoId(video_url) : null;
+    if (contentType === 'video' && !videoId) {
+      res.status(400).json({ error: 'Informe uma URL valida do YouTube' });
+      return;
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO classes (course_id, title, description, date, qr_duration_minutes, owner_id, status, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds)
-       VALUES ($1, $2, $3, NOW(), $4, $5, 'scheduled', $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+      `INSERT INTO classes (course_id, title, description, date, qr_duration_minutes, owner_id, status, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, online_content_type, video_url, video_provider, video_id, video_duration_seconds)
+       VALUES ($1, $2, $3, COALESCE($4, NOW()), $5, $6, 'scheduled', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
       [
-        course_id, title.trim(), description?.trim() || '', qr_duration_minutes || 10, req.user!.id, auxiliary_teacher_id || null,
+        course_id, title.trim(), description?.trim() || '', date || null, qr_duration_minutes || 10, req.user!.id, auxiliary_teacher_id || null,
         points_start ?? 40, points_middle ?? 30, points_end ?? 30,
         type || 'presential', expected_duration_minutes || null, slide_minimum_seconds || 30,
+        contentType, contentType === 'video' ? video_url.trim() : null, contentType === 'video' ? 'youtube' : null, videoId, video_duration_seconds || null,
       ]
     );
     const createdClass = rows[0];
@@ -154,6 +179,11 @@ router.get('/:id', async (req: Request, res: Response) => {
       type: classData.type,
       expected_duration_minutes: classData.expected_duration_minutes,
       slide_minimum_seconds: classData.slide_minimum_seconds,
+      online_content_type: classData.online_content_type,
+      video_url: classData.video_url,
+      video_provider: classData.video_provider,
+      video_id: classData.video_id,
+      video_duration_seconds: classData.video_duration_seconds,
       is_interactive: classData.is_interactive,
     });
   } catch (err) {
@@ -164,7 +194,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // PUT /api/classes/:id — Atualizar aula (status, QR timestamps)
 router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds } = req.body;
+  const { title, description, date, status, qr_duration_minutes, qr_start_at, qr_middle_at, qr_end_at, auxiliary_teacher_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, online_content_type, video_url, video_duration_seconds } = req.body;
 
   try {
     const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
@@ -236,6 +266,31 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
     if (slide_minimum_seconds !== undefined) {
       setClauses.push(`slide_minimum_seconds = $${paramIdx++}`);
       values.push(slide_minimum_seconds);
+    }
+    if (online_content_type !== undefined) {
+      const contentType = online_content_type === 'video' ? 'video' : 'slides';
+      setClauses.push(`online_content_type = $${paramIdx++}`);
+      values.push(contentType);
+      if (contentType === 'slides') {
+        setClauses.push('video_url = NULL', 'video_provider = NULL', 'video_id = NULL', 'video_duration_seconds = NULL');
+      }
+    }
+    if (video_url !== undefined) {
+      const videoId = parseYouTubeVideoId(video_url);
+      if (video_url && !videoId) {
+        res.status(400).json({ error: 'Informe uma URL valida do YouTube' });
+        return;
+      }
+      setClauses.push(`video_url = $${paramIdx++}`);
+      values.push(video_url || null);
+      setClauses.push(`video_provider = $${paramIdx++}`);
+      values.push(video_url ? 'youtube' : null);
+      setClauses.push(`video_id = $${paramIdx++}`);
+      values.push(videoId);
+    }
+    if (video_duration_seconds !== undefined) {
+      setClauses.push(`video_duration_seconds = $${paramIdx++}`);
+      values.push(video_duration_seconds);
     }
 
     values.push(req.params.id);
@@ -355,8 +410,8 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
 
     // 2. Cria nova aula
     const { rows: [newClass] } = await client.query(
-      `INSERT INTO classes (course_id, title, description, date, status, qr_duration_minutes, owner_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, presentation_url)
-       VALUES ($1, $2, $3, $4, 'scheduled', $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      `INSERT INTO classes (course_id, title, description, date, status, qr_duration_minutes, owner_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, presentation_url, online_content_type, video_url, video_provider, video_id, video_duration_seconds)
+       VALUES ($1, $2, $3, $4, 'scheduled', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
       [
         course_id,
         title?.trim() || original.title,
@@ -371,6 +426,11 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
         original.expected_duration_minutes,
         original.slide_minimum_seconds,
         original.presentation_url,
+        original.online_content_type || 'slides',
+        original.video_url,
+        original.video_provider,
+        original.video_id,
+        original.video_duration_seconds,
       ]
     );
 

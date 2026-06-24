@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Link as LinkIcon, Plus, FileUp } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Link as LinkIcon, Plus, FileUp, Video } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
@@ -26,10 +26,11 @@ export function CourseDetail() {
   const [studentsReport, setStudentsReport] = useState<any[]>([]);
   const [pendingRegistrations, setPendingRegistrations] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [newClassType, setNewClassType] = useState<'presential' | 'online' | 'interactive'>('presential');
+  const [newClassType, setNewClassType] = useState<'presential' | 'online' | 'interactive' | 'video'>('presential');
   const [interactiveFile, setInteractiveFile] = useState<File | null>(null);
   const [newExpectedDuration, setNewExpectedDuration] = useState('30');
   const [newSlideMinSeconds, setNewSlideMinSeconds] = useState('30');
+  const [newVideoUrl, setNewVideoUrl] = useState('');
   const [showEditCourse, setShowEditCourse] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -99,9 +100,11 @@ export function CourseDetail() {
         points_start: parseInt(pointsStart, 10) || 0,
         points_middle: parseInt(pointsMiddle, 10) || 0,
         points_end: parseInt(pointsEnd, 10) || 0,
-        type: newClassType === 'interactive' ? 'online' : newClassType,
+        type: (newClassType === 'interactive' || newClassType === 'video') ? 'online' : newClassType,
         is_interactive: newClassType === 'interactive',
-        expected_duration_minutes: (newClassType === 'online' || newClassType === 'interactive') ? (parseInt(newExpectedDuration, 10) || 30) : null,
+        online_content_type: newClassType === 'video' ? 'video' : 'slides',
+        video_url: newClassType === 'video' ? newVideoUrl.trim() : null,
+        expected_duration_minutes: (newClassType === 'online' || newClassType === 'interactive' || newClassType === 'video') ? (parseInt(newExpectedDuration, 10) || 30) : null,
         slide_minimum_seconds: (newClassType === 'online' || newClassType === 'interactive') ? (parseInt(newSlideMinSeconds, 10) || 30) : null,
       });
 
@@ -127,6 +130,7 @@ export function CourseDetail() {
       setNewTime('');
       setNewPdfFile(null);
       setInteractiveFile(null);
+      setNewVideoUrl('');
       setPointsStart('40');
       setPointsMiddle('30');
       setPointsEnd('30');
@@ -268,7 +272,7 @@ export function CourseDetail() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo de Aula</label>
-                  <div className="flex gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <button
                       type="button"
                       onClick={() => setNewClassType('interactive')}
@@ -305,6 +309,18 @@ export function CourseDetail() {
                     >
                       Online
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewClassType('video')}
+                      className={clsx(
+                        'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                        newClassType === 'video'
+                          ? 'border-rose-500 bg-rose-50 text-rose-700'
+                          : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      Vídeo
+                    </button>
                   </div>
                 </div>
 
@@ -339,6 +355,40 @@ export function CourseDetail() {
                         <span className="text-sm text-blue-600 font-medium flex-shrink-0">seg</span>
                       </div>
                       <p className="text-xs text-blue-500 mt-1">Trava para avançar slide</p>
+                    </div>
+                  </div>
+                )}
+
+                {newClassType === 'video' && (
+                  <div className="space-y-4 p-4 bg-rose-50 rounded-xl border border-rose-100">
+                    <div>
+                      <label className="block text-sm font-medium text-rose-800 mb-1">URL do YouTube</label>
+                      <div className="flex items-center gap-2">
+                        <Video className="w-5 h-5 text-rose-500 flex-shrink-0" />
+                        <input
+                          type="url"
+                          value={newVideoUrl}
+                          onChange={e => setNewVideoUrl(e.target.value)}
+                          placeholder="https://www.youtube.com/watch?v=..."
+                          className="w-full px-3 py-2 border border-rose-200 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white"
+                          required
+                        />
+                      </div>
+                      <p className="text-xs text-rose-500 mt-1">Pode ser vídeo não listado. A duração será lida ao abrir o player.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-rose-800 mb-1">Tempo esperado inicial</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={newExpectedDuration}
+                          onChange={e => setNewExpectedDuration(e.target.value)}
+                          className="w-full px-3 py-2 border border-rose-200 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white"
+                          min="1"
+                          required
+                        />
+                        <span className="text-sm text-rose-600 font-medium flex-shrink-0">min</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -379,7 +429,7 @@ export function CourseDetail() {
                         onChange={e => setInteractiveFile(e.target.files?.[0] || null)} />
                     </label>
                   </div>
-                ) : (
+                ) : newClassType === 'video' ? null : (
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
                     <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
@@ -420,7 +470,12 @@ export function CourseDetail() {
                           <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
                           <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                             <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
-                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>
+                            <span className={clsx(
+                              'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                              c.online_content_type === 'video' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
+                            )}>
+                              {c.online_content_type === 'video' ? 'Vídeo' : 'Online'}
+                            </span>
                           </div>
                         </Link>
                       ) : (
@@ -436,7 +491,14 @@ export function CourseDetail() {
                         <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
                         <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                           <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
-                          {c.type === 'online' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Online</span>}
+                          {c.type === 'online' && (
+                            <span className={clsx(
+                              'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                              c.online_content_type === 'video' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
+                            )}>
+                              {c.online_content_type === 'video' ? 'Vídeo' : 'Online'}
+                            </span>
+                          )}
                         </div>
                       </Link>
                     )}

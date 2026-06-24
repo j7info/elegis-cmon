@@ -837,8 +837,8 @@ export function OnlineClassView() {
           </div>
         </header>
 
-        <section className="flex-1 flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl relative">
+        <section className="flex-1 min-h-0 flex items-center justify-center p-0 bg-black">
+          <div className="w-full h-full bg-black overflow-hidden relative">
             {!videoReady && (
               <div className="absolute inset-0 flex items-center justify-center text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin" />

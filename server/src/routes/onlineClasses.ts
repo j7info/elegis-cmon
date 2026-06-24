@@ -170,7 +170,7 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
     if (durationSeconds > 0 && (!classes[0].video_duration_seconds || Math.abs(classes[0].video_duration_seconds - durationSeconds) > 1)) {
       await pool.query(
         `UPDATE classes
-         SET video_duration_seconds = $1,
+         SET video_duration_seconds = $1::int,
              expected_duration_minutes = CEIL($1::numeric / 60)::int,
              updated_at = NOW()
          WHERE id = $2`,
@@ -183,12 +183,12 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
 
     const { rows } = await pool.query(
       `UPDATE class_online_progress
-       SET max_video_position_seconds = GREATEST(max_video_position_seconds, $1),
-           video_duration_seconds = COALESCE($2, video_duration_seconds),
-           total_time_spent_seconds = GREATEST(total_time_spent_seconds, $1),
+       SET max_video_position_seconds = GREATEST(max_video_position_seconds, $1::int),
+           video_duration_seconds = COALESCE($2::int, video_duration_seconds),
+           total_time_spent_seconds = GREATEST(total_time_spent_seconds, $1::int),
            completed_at = CASE
              WHEN completed_at IS NOT NULL THEN completed_at
-             WHEN $3 = TRUE THEN NOW()
+             WHEN $3::boolean = TRUE THEN NOW()
              ELSE completed_at
            END
        WHERE class_id = $4 AND identifier = $5

@@ -335,7 +335,11 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verifica tempo mínimo no slide atual
+    const isInteractiveSlideEvent = requestedSlide > 0;
+
+    // Verifica tempo mínimo no slide atual apenas para o leitor online padrão.
+    // Aulas interativas HTML navegam livremente; elas só emitem o slide visto
+    // e o sistema registra o histórico.
     const { rows: classes } = await pool.query(
       'SELECT slide_minimum_seconds FROM classes WHERE id = $1',
       [id]
@@ -343,7 +347,7 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
     const minSecs = classes[0]?.slide_minimum_seconds ?? 30;
     const elapsed = (Date.now() - new Date(prog.slide_started_at).getTime()) / 1000;
 
-    if (elapsed < minSecs) {
+    if (!isInteractiveSlideEvent && elapsed < minSecs) {
       const falta = Math.ceil(minSecs - elapsed);
       res.status(429).json({
         error: `Aguarde mais ${falta} segundo(s) para avançar`,
@@ -354,9 +358,9 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
       return;
     }
 
-    // Adiciona no máximo o tempo mínimo exigido para evitar inflar presença
-    // quando o aluno volta dias depois a uma sessão já iniciada.
-    const timeOnSlide = Math.min(Math.floor(elapsed), minSecs);
+    // Para aulas interativas, a métrica é o avanço de slides confirmado pelo sistema.
+    // Para o leitor online padrão, preserva-se o tempo mínimo por slide.
+    const timeOnSlide = isInteractiveSlideEvent ? minSecs : Math.min(Math.floor(elapsed), minSecs);
     const newTotalTime = prog.total_time_spent_seconds + timeOnSlide;
     const nextSlide = Math.max(prog.current_slide + 1, targetSlide);
 

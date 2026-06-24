@@ -52,14 +52,32 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
     // 3. Aulas com presença presencial ou progresso online do próprio aluno
     const { rows: classesRaw } = await pool.query(
       `SELECT
-         cl.id, cl.course_id, cl.title, cl.date, cl.type,
+         cl.id, cl.course_id, cl.title, cl.date, cl.type, cl.expected_duration_minutes,
          cl.points_start, cl.points_middle, cl.points_end,
          CASE
            WHEN cl.type = 'online' AND op.id IS NOT NULL THEN jsonb_build_object(
              'source', 'online',
-             'present', op.completed_at IS NOT NULL,
-             'justification', CASE WHEN op.completed_at IS NOT NULL THEN 100 ELSE NULL END,
+             'present', (
+               op.completed_at IS NOT NULL
+               OR (
+                 COALESCE(cl.expected_duration_minutes, 0) > 0
+                 AND COALESCE(op.total_time_spent_seconds, 0) > 0
+               )
+             ),
+             'justification', CASE
+               WHEN op.completed_at IS NOT NULL THEN 100
+               WHEN COALESCE(cl.expected_duration_minutes, 0) > 0
+                 THEN LEAST(100, ROUND(((COALESCE(op.total_time_spent_seconds, 0)::numeric / 60) / cl.expected_duration_minutes::numeric) * 100))::int
+               ELSE 0
+             END,
+             'percentage', CASE
+               WHEN op.completed_at IS NOT NULL THEN 100
+               WHEN COALESCE(cl.expected_duration_minutes, 0) > 0
+                 THEN LEAST(100, ROUND(((COALESCE(op.total_time_spent_seconds, 0)::numeric / 60) / cl.expected_duration_minutes::numeric) * 100))::int
+               ELSE 0
+             END,
              'completed_at', op.completed_at,
+             'current_slide', op.current_slide,
              'total_time_spent_seconds', op.total_time_spent_seconds
            )
            WHEN cl.type <> 'online' AND a.id IS NOT NULL THEN jsonb_build_object(

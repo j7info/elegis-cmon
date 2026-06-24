@@ -560,7 +560,7 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
     }
 
     const { rows: [classRow] } = await pool.query(
-      'SELECT id, course_id, type FROM classes WHERE id = $1',
+      'SELECT id, course_id, type, expected_duration_minutes FROM classes WHERE id = $1',
       [req.params.id]
     );
 
@@ -574,13 +574,23 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
              COALESCE(r.full_name, p.full_name) AS full_name,
              r.role,
              r.department,
-             CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_start,
+             CASE WHEN p.id IS NOT NULL THEN (EXTRACT(EPOCH FROM p.created_at)::bigint * 1000) ELSE NULL END AS scan_start,
              CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_middle,
              CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_end,
-             CASE WHEN p.completed_at IS NOT NULL THEN 100 ELSE NULL END AS justification,
+             CASE
+               WHEN p.completed_at IS NOT NULL THEN 100
+               WHEN $3::numeric > 0 THEN LEAST(100, ROUND(((COALESCE(p.total_time_spent_seconds, 0)::numeric / 60) / $3::numeric) * 100))::int
+               ELSE 0
+             END AS justification,
+             CASE
+               WHEN p.completed_at IS NOT NULL THEN 100
+               WHEN $3::numeric > 0 THEN LEAST(100, ROUND(((COALESCE(p.total_time_spent_seconds, 0)::numeric / 60) / $3::numeric) * 100))::int
+               ELSE 0
+             END AS percentage,
              p.created_at,
              p.completed_at,
              p.total_time_spent_seconds,
+             p.current_slide,
              'online' AS source
            FROM class_online_progress p
            LEFT JOIN app_users u
@@ -596,7 +606,7 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
            ORDER BY p.id, CASE WHEN r.id IS NULL THEN 1 ELSE 0 END, r.created_at DESC
          )
          SELECT * FROM matched_progress ORDER BY created_at DESC`,
-        [req.params.id, classRow.course_id]
+        [req.params.id, classRow.course_id, classRow.expected_duration_minutes || 0]
       );
       res.json(rows);
       return;

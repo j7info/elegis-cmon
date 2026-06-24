@@ -56,6 +56,21 @@ async function findBestOnlineProgress(classId: string, identifiers: string[], fo
   return rows[0] || null;
 }
 
+function calculateOnlinePresencePercentage(progress: any, cls: any): number | null {
+  if (!progress) return null;
+  if (progress.completed_at) return 100;
+
+  if (cls.online_content_type === 'video') {
+    const duration = Number(cls.video_duration_seconds || progress.video_duration_seconds || 0);
+    if (duration <= 0) return 0;
+    return Math.min(100, Math.round((Number(progress.max_video_position_seconds || 0) / duration) * 100));
+  }
+
+  const expectedMin = Number(cls.expected_duration_minutes || 0);
+  if (expectedMin <= 0) return 0;
+  return Math.min(100, Math.round(((Number(progress.total_time_spent_seconds || 0) / 60) / expectedMin) * 100));
+}
+
 // POST /api/classes/:id/online/join — Aluno inicia/acessa aula online
 router.post('/:id/online/join', async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -172,14 +187,7 @@ router.get('/:id/online/state', async (req: Request, res: Response) => {
     const bestProgress = await findBestOnlineProgress(id, identifiers);
     const progress = bestProgress ? [bestProgress] : [];
 
-    // Calcula presença
-    let presence_percentage: number | null = null;
-    if (progress.length > 0 && progress[0].completed_at && cls.online_content_type === 'video') {
-      presence_percentage = 100;
-    } else if (progress.length > 0 && progress[0].completed_at && cls.expected_duration_minutes && cls.expected_duration_minutes > 0) {
-      const timeTakenMin = progress[0].total_time_spent_seconds / 60;
-      presence_percentage = Math.min(100, Math.round((timeTakenMin / cls.expected_duration_minutes) * 100));
-    }
+    const presence_percentage = calculateOnlinePresencePercentage(progress[0], cls);
 
     res.json({
       class: {

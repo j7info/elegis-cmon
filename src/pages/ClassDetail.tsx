@@ -1339,15 +1339,15 @@ export function ClassDetail() {
                   </div>
                   {editOnlineContentType === 'video' ? (
                     <div>
-                      <label className="block text-sm font-medium text-blue-800 mb-1">URL do YouTube</label>
+                      <label className="block text-sm font-medium text-blue-800 mb-1">URL ou código de incorporação do YouTube</label>
                       <div className="flex items-center gap-2">
                         <Video className="w-5 h-5 text-rose-500 flex-shrink-0" />
                         <input
-                          type="url"
+                          type="text"
                           value={editVideoUrl}
                           onChange={e => setEditVideoUrl(e.target.value)}
                           className="w-full px-4 py-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white"
-                          placeholder="https://www.youtube.com/watch?v=..."
+                          placeholder="https://www.youtube.com/watch?v=... ou <iframe ...>"
                           required
                         />
                       </div>

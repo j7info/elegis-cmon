@@ -362,19 +362,19 @@ export function CourseDetail() {
                 {newClassType === 'video' && (
                   <div className="space-y-4 p-4 bg-rose-50 rounded-xl border border-rose-100">
                     <div>
-                      <label className="block text-sm font-medium text-rose-800 mb-1">URL do YouTube</label>
+                      <label className="block text-sm font-medium text-rose-800 mb-1">URL ou código de incorporação do YouTube</label>
                       <div className="flex items-center gap-2">
                         <Video className="w-5 h-5 text-rose-500 flex-shrink-0" />
                         <input
-                          type="url"
+                          type="text"
                           value={newVideoUrl}
                           onChange={e => setNewVideoUrl(e.target.value)}
-                          placeholder="https://www.youtube.com/watch?v=..."
+                          placeholder="https://www.youtube.com/watch?v=... ou <iframe ...>"
                           className="w-full px-3 py-2 border border-rose-200 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white"
                           required
                         />
                       </div>
-                      <p className="text-xs text-rose-500 mt-1">Pode ser vídeo não listado. A duração será lida ao abrir o player.</p>
+                      <p className="text-xs text-rose-500 mt-1">Pode ser vídeo não listado. O sistema extrai o vídeo e lê a duração ao abrir o player.</p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-rose-800 mb-1">Tempo esperado inicial</label>

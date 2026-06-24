@@ -9,8 +9,11 @@ const router = Router();
 
 function parseYouTubeVideoId(url: string | undefined | null): string | null {
   if (!url?.trim()) return null;
+  const rawValue = url.trim();
+  const iframeSrc = rawValue.match(/src=["']([^"']+)["']/i)?.[1];
+  const normalizedUrl = iframeSrc || rawValue;
   try {
-    const parsed = new URL(url.trim());
+    const parsed = new URL(normalizedUrl);
     if (parsed.hostname === 'youtu.be') return parsed.pathname.split('/').filter(Boolean)[0] || null;
     if (parsed.hostname.includes('youtube.com')) {
       if (parsed.pathname.startsWith('/shorts/') || parsed.pathname.startsWith('/embed/')) {
@@ -19,7 +22,7 @@ function parseYouTubeVideoId(url: string | undefined | null): string | null {
       return parsed.searchParams.get('v');
     }
   } catch {
-    return null;
+    return rawValue.match(/youtube\.com\/embed\/([A-Za-z0-9_-]+)/i)?.[1] || null;
   }
   return null;
 }

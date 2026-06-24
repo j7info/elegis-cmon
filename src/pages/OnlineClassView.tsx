@@ -175,7 +175,7 @@ export function OnlineClassView() {
   // After loading slide count, start viewing
   useEffect(() => {
     if (step === 'loading' && isVideoClass && classData?.video_id) {
-      setStep(progress?.max_video_position_seconds ? 'viewing' : 'intro');
+      setStep('intro');
       return;
     }
 
@@ -551,14 +551,18 @@ export function OnlineClassView() {
                 </div>
                 <div className="flex gap-3">
                   <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">2</div>
-                  <p>O sistema mostra o tempo assistido e quanto falta para terminar.</p>
+                  <p>Você pode pausar e retomar o vídeo quando precisar.</p>
                 </div>
                 <div className="flex gap-3">
                   <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">3</div>
-                  <p>Você pode voltar 10 ou 30 segundos para revisar, mas só avança até o trecho já assistido.</p>
+                  <p>O sistema mostra o tempo assistido e quanto falta para terminar.</p>
                 </div>
                 <div className="flex gap-3">
                   <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">4</div>
+                  <p>Você pode voltar 10 ou 30 segundos para revisar, mas só avança até o trecho já assistido.</p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center flex-shrink-0 font-bold text-sm">5</div>
                   <p>Se houver avaliação, ela será liberada depois que o vídeo for assistido por completo ao menos uma vez.</p>
                 </div>
               </>
@@ -640,7 +644,7 @@ export function OnlineClassView() {
 
             {isVideoClass && (
               <button
-                onClick={() => setStep('viewing')}
+                onClick={() => setStep('intro')}
                 className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
               >
                 <RotateCcw className="w-5 h-5" /> Rever vídeo

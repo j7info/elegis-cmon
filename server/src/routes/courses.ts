@@ -60,12 +60,68 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
          c.*,
          CASE WHEN r.id IS NULL THEN 'available' ELSE 'enrolled' END AS enrollment_status,
          r.status AS registration_status,
-         r.created_at AS registered_at
+         r.created_at AS registered_at,
+         COALESCE(pending.pending_class_count, 0)::int AS pending_class_count,
+         COALESCE(pending.pending_online_count, 0)::int AS pending_online_count,
+         COALESCE(pending.pending_presential_count, 0)::int AS pending_presential_count,
+         pending.latest_pending_class
        FROM courses c
        INNER JOIN app_users u ON u.id = $1
        LEFT JOIN registrations r
          ON r.course_id = c.id
         AND ${studentIdentifiersCondition('r')}
+       LEFT JOIN LATERAL (
+         WITH pending_classes AS (
+           SELECT cl.id, cl.title, cl.date, cl.type, cl.online_content_type, cl.status
+           FROM classes cl
+           LEFT JOIN LATERAL (
+             SELECT *
+             FROM attendances a
+             WHERE a.class_id = cl.id
+               AND (a.identifier = u.cpf OR a.identifier = u.email OR a.identifier = u.matricula)
+             ORDER BY a.updated_at DESC NULLS LAST, a.created_at DESC
+             LIMIT 1
+           ) a ON cl.type <> 'online'
+           LEFT JOIN LATERAL (
+             SELECT *
+             FROM class_online_progress op
+             WHERE op.class_id = cl.id
+               AND (op.identifier = u.cpf OR op.identifier = u.email OR op.identifier = u.matricula)
+             ORDER BY op.completed_at DESC NULLS LAST, op.created_at DESC
+             LIMIT 1
+           ) op ON cl.type = 'online'
+           WHERE cl.course_id = c.id
+             AND cl.status IN ('scheduled', 'active')
+             AND (
+               (cl.type = 'online' AND op.completed_at IS NULL)
+               OR (
+                 cl.type <> 'online'
+                 AND (
+                   a.id IS NULL
+                   OR (a.scan_start IS NULL AND a.scan_middle IS NULL AND a.scan_end IS NULL AND a.justification IS NULL)
+                 )
+               )
+             )
+         )
+         SELECT
+           COUNT(*)::int AS pending_class_count,
+           COUNT(*) FILTER (WHERE type = 'online')::int AS pending_online_count,
+           COUNT(*) FILTER (WHERE type <> 'online')::int AS pending_presential_count,
+           (
+             SELECT jsonb_build_object(
+               'id', pc.id,
+               'title', pc.title,
+               'date', pc.date,
+               'type', pc.type,
+               'online_content_type', pc.online_content_type,
+               'status', pc.status
+             )
+             FROM pending_classes pc
+             ORDER BY pc.date DESC NULLS LAST, pc.id DESC
+             LIMIT 1
+           ) AS latest_pending_class
+         FROM pending_classes
+       ) pending ON r.id IS NOT NULL
        WHERE r.id IS NOT NULL OR c.enrollment_open = TRUE
        ORDER BY c.created_at DESC`,
       [req.user!.id]

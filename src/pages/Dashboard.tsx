@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth, AuthUser } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { Link } from 'react-router-dom';
-import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, Link as LinkIcon, UserPlus, CheckCircle2 } from 'lucide-react';
+import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, Link as LinkIcon, UserPlus, CheckCircle2, Bell } from 'lucide-react';
 import clsx from 'clsx';
 
 const canCreateCourse = (u: AuthUser | null) =>
@@ -157,16 +157,28 @@ export function Dashboard() {
   const renderCourseCard = (c: any) => {
     const status = !c.start_date ? null : c.end_date && new Date(c.end_date) < new Date() ? 'completed' : new Date(c.start_date) > new Date() ? 'upcoming' : 'active';
     const isAvailable = isAluno && c.enrollment_status === 'available';
+    const pendingCount = Number(c.pending_class_count || 0);
+    const latestPendingClass = c.latest_pending_class;
+    const hasPendingClasses = isAluno && !isAvailable && pendingCount > 0;
+    const pendingLabel = pendingCount === 1 ? '1 aula pendente' : `${pendingCount} aulas pendentes`;
+    const pendingTypeLabel = latestPendingClass?.type === 'online'
+      ? latestPendingClass?.online_content_type === 'video' ? 'Vídeo novo para assistir' : 'Aula online nova'
+      : 'Aula presencial pendente';
     const card = (
       <div className={clsx(
         "bg-white p-6 rounded-xl shadow-sm border hover:shadow-md transition-all h-full flex flex-col",
-        isAvailable ? "border-blue-100 hover:border-blue-300" : "border-gray-100 hover:border-teal-300"
+        hasPendingClasses ? "border-amber-200 hover:border-amber-300" : isAvailable ? "border-blue-100 hover:border-blue-300" : "border-gray-100 hover:border-teal-300"
       )}>
         <div className="flex justify-between items-start mb-2">
-          <div className={clsx("p-2 rounded-lg", isAvailable ? "bg-blue-50 text-blue-600" : "bg-teal-50 text-teal-600")}>
-            <GraduationCap className="w-5 h-5" />
+          <div className={clsx("p-2 rounded-lg", hasPendingClasses ? "bg-amber-50 text-amber-600" : isAvailable ? "bg-blue-50 text-blue-600" : "bg-teal-50 text-teal-600")}>
+            {hasPendingClasses ? <Bell className="w-5 h-5" /> : <GraduationCap className="w-5 h-5" />}
           </div>
           <div className="flex gap-2 flex-wrap justify-end">
+            {hasPendingClasses && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-amber-100 text-amber-700">
+                Nova aula
+              </span>
+            )}
             {isAvailable && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-700">
                 Disponível
@@ -185,6 +197,17 @@ export function Dashboard() {
         </div>
         <h3 className={clsx("text-xl font-semibold text-gray-900 mb-1 truncate transition-colors", !isAvailable && "group-hover:text-teal-600")}>{c.title}</h3>
         {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
+        {hasPendingClasses && (
+          <div className="mb-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="flex items-center gap-2 font-semibold">
+              <Bell className="w-4 h-4" />
+              {pendingLabel}
+            </div>
+            <p className="mt-1 text-xs text-amber-700 line-clamp-1">
+              {latestPendingClass?.title ? `${pendingTypeLabel}: ${latestPendingClass.title}` : pendingTypeLabel}
+            </p>
+          </div>
+        )}
         {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
         <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-50">
           {!isAluno && (

@@ -937,7 +937,14 @@ export function ClassDetail() {
                       </td>
                       <td className="px-4 py-3 text-center text-xs">
                         {isOnlineClass
-                          ? (att?.completed_at ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)
+                          ? att
+                            ? (
+                              <div className="flex flex-col items-center leading-tight">
+                                <span className="font-semibold text-gray-700">{Number(att.current_slide || 0)} slides</span>
+                                {att.percentage != null && <span className="text-[11px] text-teal-600">{att.percentage}%</span>}
+                              </div>
+                            )
+                            : <span className="text-gray-300">-</span>
                           : (att?.scan_middle ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)}
                       </td>
                       <td className="px-4 py-3 text-center text-xs">

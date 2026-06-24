@@ -44,6 +44,9 @@ export function CourseDetail() {
   const [reuseStartDate, setReuseStartDate] = useState('');
   const [reuseEndDate, setReuseEndDate] = useState('');
   const [isReusing, setIsReusing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [selfScanLoading, setSelfScanLoading] = useState<string | null>(null);
+  const [selfScanFeedback, setSelfScanFeedback] = useState<Record<number, { type: 'success' | 'error'; message: string }>>({});
 
   const isStudent = user?.system_role === 'ALUNO';
 
@@ -84,6 +87,64 @@ export function CourseDetail() {
   useEffect(() => {
     loadData();
   }, [courseId]);
+
+  useEffect(() => {
+    if (!isStudent) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 15000);
+    return () => window.clearInterval(timer);
+  }, [isStudent]);
+
+  useEffect(() => {
+    if (!isStudent || !courseId) return;
+    const timer = window.setInterval(() => loadData(), 20000);
+    return () => window.clearInterval(timer);
+  }, [isStudent, courseId]);
+
+  const getActiveAttendanceStep = (classItem: any): 'start' | 'middle' | 'end' | null => {
+    if (!isStudent || classItem.type === 'online' || classItem.status !== 'active') return null;
+    const durationMs = (classItem.qr_duration_minutes || 10) * 60 * 1000;
+    const steps: Array<'start' | 'middle' | 'end'> = ['start', 'middle', 'end'];
+
+    for (const step of steps) {
+      const activeAt = classItem[`qr_${step}_at`];
+      if (activeAt && now >= Number(activeAt) && now <= Number(activeAt) + durationMs) {
+        return step;
+      }
+    }
+
+    return null;
+  };
+
+  const getStepLabel = (step: 'start' | 'middle' | 'end') => {
+    if (step === 'start') return 'entrada';
+    if (step === 'middle') return 'meio da aula';
+    return 'saída';
+  };
+
+  const handleSelfAttendance = async (classItem: any, step: 'start' | 'middle' | 'end') => {
+    const loadingKey = `${classItem.id}:${step}`;
+    setSelfScanLoading(loadingKey);
+    setSelfScanFeedback(prev => {
+      const next = { ...prev };
+      delete next[classItem.id];
+      return next;
+    });
+
+    try {
+      const result = await api.post(`/classes/${classItem.id}/scan/${step}/self`);
+      setSelfScanFeedback(prev => ({
+        ...prev,
+        [classItem.id]: { type: 'success', message: result.message || 'Presença registrada com sucesso.' },
+      }));
+    } catch (err: any) {
+      setSelfScanFeedback(prev => ({
+        ...prev,
+        [classItem.id]: { type: 'error', message: err?.message || 'Não foi possível registrar presença.' },
+      }));
+    } finally {
+      setSelfScanLoading(null);
+    }
+  };
 
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -472,30 +533,45 @@ export function CourseDetail() {
               </div>
             ) : (
               <div className="grid gap-3">
-                {classes.map(c => (
-                  <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex items-center justify-between group">
+                {classes.map(c => {
+                  const activeAttendanceStep = getActiveAttendanceStep(c);
+                  const feedback = selfScanFeedback[c.id];
+                  return (
+                  <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between group">
                     {isStudent ? (
-                      c.type === 'online' || c.is_interactive ? (
-                        <Link to={c.is_interactive ? `/interactive-lesson/${c.id}` : `/online-class/${c.id}`} className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                            <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                      <div className="flex-1 min-w-0">
+                        {c.type === 'online' || c.is_interactive ? (
+                          <Link to={c.is_interactive ? `/interactive-lesson/${c.id}` : `/online-class/${c.id}`} className="block">
+                            <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
+                          </Link>
+                        ) : (
+                          <h3 className="font-semibold text-gray-900">{c.title}</h3>
+                        )}
+                        <div className="flex items-center gap-2 text-xs text-gray-500 mt-1 flex-wrap">
+                          <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                          {c.type === 'online' && (
                             <span className={clsx(
                               'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
                               c.online_content_type === 'video' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
                             )}>
                               {c.online_content_type === 'video' ? 'Vídeo' : 'Online'}
                             </span>
-                          </div>
-                        </Link>
-                      ) : (
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900">{c.title}</h3>
-                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                            <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
-                          </div>
+                          )}
+                          {activeAttendanceStep && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-teal-100 text-teal-700">
+                              Chamada de {getStepLabel(activeAttendanceStep)} aberta
+                            </span>
+                          )}
                         </div>
-                      )
+                        {feedback && (
+                          <p className={clsx(
+                            'mt-2 text-xs font-medium',
+                            feedback.type === 'success' ? 'text-green-700' : 'text-red-700'
+                          )}>
+                            {feedback.message}
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       <Link to={`/class/${c.id}`} className="flex-1 min-w-0">
                         <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
@@ -515,6 +591,17 @@ export function CourseDetail() {
                     <div className="flex items-center gap-2">
                       {isStudent ? (
                         <>
+                          {activeAttendanceStep && (
+                            <button
+                              type="button"
+                              onClick={() => handleSelfAttendance(c, activeAttendanceStep)}
+                              disabled={selfScanLoading === `${c.id}:${activeAttendanceStep}`}
+                              className="text-xs font-medium px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-60 transition-colors flex items-center gap-1.5"
+                            >
+                              {selfScanLoading === `${c.id}:${activeAttendanceStep}` && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                              Registrar {getStepLabel(activeAttendanceStep)}
+                            </button>
+                          )}
                           {(c.type === 'online' || c.is_interactive) && c.status === 'active' && (
                             <Link to={c.is_interactive ? `/interactive-lesson/${c.id}` : `/online-class/${c.id}`} className="text-xs font-medium px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700 transition-colors">
                               Acessar Aula
@@ -561,7 +648,8 @@ export function CourseDetail() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

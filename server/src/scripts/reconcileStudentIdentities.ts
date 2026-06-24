@@ -214,14 +214,45 @@ async function mergeDuplicateUsers(client: DbClient, stats: ReconcileStats) {
   }
 }
 
-async function canonicalUserForName(client: DbClient, fullName: string): Promise<UserRow | null> {
+async function normalizeRecordsForExistingUsers(client: DbClient, stats: ReconcileStats) {
+  const { rows } = await client.query<UserRow>(
+    `SELECT id, name, cpf, email, matricula, cargo, departamento
+     FROM app_users
+     ORDER BY CASE WHEN matricula IS NULL OR matricula = '' THEN 1 ELSE 0 END, id`
+  );
+
+  for (const user of rows) {
+    const ids = identityValues(user);
+    const targetIdentifier = preferredIdentifier(user);
+    stats.mergedRegistrations += await updateRegistrations(client, ids, targetIdentifier, user);
+    stats.mergedAttendances += await updateAttendances(client, ids, targetIdentifier, user);
+    stats.mergedProgress += await updateProgress(client, ids, targetIdentifier, user);
+  }
+}
+
+async function canonicalUserForNameOrIdentifiers(client: DbClient, fullName: string, identifiers: string[]): Promise<UserRow | null> {
   const { rows } = await client.query<UserRow>(
     `SELECT id, name, cpf, email, matricula, cargo, departamento
      FROM app_users
      WHERE lower(trim(name)) = lower(trim($1))
-     ORDER BY CASE WHEN matricula IS NULL OR matricula = '' THEN 1 ELSE 0 END, id
+        OR cpf = ANY($2::text[])
+        OR regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = ANY($2::text[])
+        OR lower(COALESCE(email, '')) = ANY($3::text[])
+        OR matricula = ANY($2::text[])
+        OR regexp_replace(COALESCE(matricula, ''), '\\D', '', 'g') = ANY($2::text[])
+     ORDER BY
+       CASE WHEN matricula IS NULL OR matricula = '' THEN 1 ELSE 0 END,
+       CASE
+         WHEN cpf = ANY($2::text[])
+           OR regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = ANY($2::text[])
+           OR lower(COALESCE(email, '')) = ANY($3::text[])
+           OR matricula = ANY($2::text[])
+           OR regexp_replace(COALESCE(matricula, ''), '\\D', '', 'g') = ANY($2::text[])
+         THEN 0 ELSE 1
+       END,
+       id
      LIMIT 1`,
-    [fullName]
+    [fullName, identifiers, identifiers.map((identifier) => identifier.toLowerCase())]
   );
   return rows[0] || null;
 }
@@ -240,7 +271,7 @@ async function consolidateRegistrationsByName(client: DbClient, stats: Reconcile
   );
 
   for (const group of rows) {
-    const user = await canonicalUserForName(client, group.full_name);
+    const user = await canonicalUserForNameOrIdentifiers(client, group.full_name, group.identifiers);
     const targetIdentifier = user ? preferredIdentifier(user) : group.identifiers[0];
     stats.mergedRegistrations += await updateRegistrations(client, group.identifiers, targetIdentifier, user || { name: group.full_name });
   }
@@ -259,7 +290,7 @@ async function consolidateAttendancesByName(client: DbClient, stats: ReconcileSt
   );
 
   for (const group of rows) {
-    const user = await canonicalUserForName(client, group.full_name);
+    const user = await canonicalUserForNameOrIdentifiers(client, group.full_name, group.identifiers);
     const targetIdentifier = user ? preferredIdentifier(user) : group.identifiers[0];
     stats.mergedAttendances += await updateAttendances(client, group.identifiers, targetIdentifier, user || { name: group.full_name });
   }
@@ -278,7 +309,7 @@ async function consolidateProgressByName(client: DbClient, stats: ReconcileStats
   );
 
   for (const group of rows) {
-    const user = await canonicalUserForName(client, group.full_name);
+    const user = await canonicalUserForNameOrIdentifiers(client, group.full_name, group.identifiers);
     const targetIdentifier = user ? preferredIdentifier(user) : group.identifiers[0];
     stats.mergedProgress += await updateProgress(client, group.identifiers, targetIdentifier, user || { name: group.full_name });
   }
@@ -297,6 +328,7 @@ async function main() {
   try {
     await client.query('BEGIN');
     await mergeDuplicateUsers(client, stats);
+    await normalizeRecordsForExistingUsers(client, stats);
     await consolidateRegistrationsByName(client, stats);
     await consolidateAttendancesByName(client, stats);
     await consolidateProgressByName(client, stats);

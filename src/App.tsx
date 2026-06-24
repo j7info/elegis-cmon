@@ -7,7 +7,6 @@ import { CourseDetail } from './pages/CourseDetail';
 import { ClassDetail } from './pages/ClassDetail';
 import { ScanPage } from './pages/ScanPage';
 import { RegisterClass } from './pages/RegisterClass';
-import { RegisterCourse } from './pages/RegisterCourse';
 import { CertificateManager } from './pages/CertificateManager';
 import { ResetPassword } from './pages/ResetPassword';
 import { PrintCertificate } from './pages/PrintCertificate';
@@ -44,7 +43,7 @@ function Main() {
           <Route path="me" element={<ProtectedRoute><MyPerformance /></ProtectedRoute>} />
         </Route>
         <Route path="/register/:classId" element={<RegisterClass />} />
-        <Route path="/course-register/:courseId" element={<RegisterCourse />} />
+        <Route path="/course-register/:courseId" element={<Navigate to="/" replace />} />
         <Route path="/pre-register" element={<PreRegister />} />
         <Route path="/s/:classId/:step" element={<ScanPage />} />
         <Route path="/reset-password" element={<ResetPassword />} />

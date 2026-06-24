@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth, AuthUser } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { Link } from 'react-router-dom';
-import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, Link as LinkIcon, UserPlus, CheckCircle2, Bell } from 'lucide-react';
+import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, UserPlus, CheckCircle2, Bell } from 'lucide-react';
 import clsx from 'clsx';
 
 const canCreateCourse = (u: AuthUser | null) =>
@@ -210,19 +210,6 @@ export function Dashboard() {
         )}
         {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
         <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-50">
-          {!isAluno && (
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                navigator.clipboard.writeText(`${window.location.origin}/#/course-register/${c.id}`);
-                alert('Link de cadastro copiado!');
-              }}
-              className="text-teal-600 hover:text-teal-800 text-sm font-medium flex items-center gap-1 z-10 px-2 py-1 rounded hover:bg-teal-50 transition-colors"
-            >
-              <LinkIcon className="w-4 h-4" /> Copiar Link
-            </button>
-          )}
           {isAvailable ? (
             <button
               type="button"

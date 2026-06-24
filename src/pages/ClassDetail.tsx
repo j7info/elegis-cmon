@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Link as LinkIcon, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -163,11 +163,27 @@ export function ClassDetail() {
     return p;
   };
 
-  const normalizeMatchKey = (value: any) => String(value || '').trim().toLowerCase();
-  const findAttendance = (identifier: string) =>
-    attendances.find(a => normalizeMatchKey(a.identifier) === normalizeMatchKey(identifier));
-  const findEvaluationScore = (identifier: string) =>
-    evalScores.find(s => normalizeMatchKey(s.identifier) === normalizeMatchKey(identifier));
+  const normalizeMatchKey = (value: any) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw.includes('@')) {
+      const numeric = raw.replace(/\D/g, '');
+      return numeric || raw;
+    }
+    return raw;
+  };
+  const identityKeys = (student: any) => new Set(
+    [student?.identifier, ...(Array.isArray(student?.aliases) ? student.aliases : [])]
+      .filter(Boolean)
+      .map(normalizeMatchKey)
+  );
+  const findAttendance = (student: any) => {
+    const keys = identityKeys(student);
+    return attendances.find(a => keys.has(normalizeMatchKey(a.identifier)));
+  };
+  const findEvaluationScore = (student: any) => {
+    const keys = identityKeys(student);
+    return evalScores.find(s => keys.has(normalizeMatchKey(s.identifier)));
+  };
   const formatDuration = (seconds: number | string | undefined | null) => {
     const totalSeconds = Number(seconds) || 0;
     const minutes = Math.floor(totalSeconds / 60);
@@ -323,7 +339,7 @@ export function ClassDetail() {
     };
 
     const rows = registrations.map(reg => {
-      const att = findAttendance(reg.identifier);
+      const att = findAttendance(reg);
       return [
         escapeCsv(reg.full_name),
         escapeCsv(reg.identifier),
@@ -359,8 +375,8 @@ export function ClassDetail() {
     };
 
     const bodyRows = registrations.map(reg => {
-      const att = findAttendance(reg.identifier);
-      const es = findEvaluationScore(reg.identifier);
+      const att = findAttendance(reg);
+      const es = findEvaluationScore(reg);
       const evalPts = es ? `${es.total_score}/${es.total_possible}` : '—';
       return `<tr>
         <td>${esc(reg.full_name)}</td>
@@ -552,9 +568,7 @@ export function ClassDetail() {
 
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
   const onlineClassUrl = `${appUrl}/#/${classData?.is_interactive ? 'interactive-lesson' : 'online-class'}/${classId}`;
-  const registrationUrl = `${appUrl}/#/course-register/${classData?.course_id || ''}`;
-  
-  const linkToShare = classData?.type === 'online' ? onlineClassUrl : registrationUrl;
+  const linkToShare = onlineClassUrl;
 
   const copyLink = () => {
     navigator.clipboard.writeText(linkToShare);
@@ -563,7 +577,7 @@ export function ClassDetail() {
   };
 
   const chartData = registrations.map(reg => {
-    const att = findAttendance(reg.identifier);
+    const att = findAttendance(reg);
     return { name: reg.full_name || reg.identifier, points: calcPoints(att) };
   }).sort((a, b) => b.points - a.points);
 
@@ -633,10 +647,12 @@ export function ClassDetail() {
             )}
           </div>
 
-          <button onClick={copyLink} className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-            {linkCopied ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />} 
-            Link Cadastro
-          </button>
+          {classData.type === 'online' && (
+            <button onClick={copyLink} className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+              {linkCopied ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />} 
+              Link Aula Online
+            </button>
+          )}
           {classData.status === 'completed' && (
             <button onClick={async () => {
               if (allUsers.length === 0) {
@@ -908,7 +924,7 @@ export function ClassDetail() {
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
               ) : (
                 registrations.map(reg => {
-                  const att = findAttendance(reg.identifier);
+                  const att = findAttendance(reg);
                   const p = calcPoints(att);
                   return (
                     <tr key={reg.identifier} className="border-b border-gray-50 hover:bg-gray-50/50">
@@ -932,7 +948,7 @@ export function ClassDetail() {
                       <td className="px-4 py-3 text-center font-bold text-teal-600">{p}</td>
                       <td className="px-4 py-3 text-center">
                         {(() => {
-                          const es = findEvaluationScore(reg.identifier);
+                          const es = findEvaluationScore(reg);
                           if (es) {
                             const pts = parseInt(es.total_score);
                             const maxPts = parseInt(es.total_possible);

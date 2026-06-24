@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Link as LinkIcon, Plus, FileUp, Video } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
@@ -287,15 +287,6 @@ export function CourseDetail() {
               className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
             >
               <Copy className="w-4 h-4" /> Reutilizar Curso
-            </button>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(`${window.location.origin}/#/course-register/${courseId}`);
-                alert('Link de cadastro copiado!');
-              }}
-              className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
-            >
-              <LinkIcon className="w-4 h-4" /> Link Inscrição
             </button>
             <Link 
               to={`/course/${courseId}/certificates`}

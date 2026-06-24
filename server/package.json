@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/db/migrate.js && node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "reconcile:students": "tsx src/scripts/reconcileStudentIdentities.ts"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",

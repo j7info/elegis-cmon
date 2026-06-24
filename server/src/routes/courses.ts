@@ -456,10 +456,83 @@ router.get('/:id/students', authMiddleware, async (req: AuthRequest, res: Respon
     }
 
     const { rows } = await pool.query(
-      `SELECT DISTINCT ON (identifier) identifier, full_name, role, department, created_at
-       FROM registrations
-       WHERE course_id = $1
-       ORDER BY identifier, created_at`,
+      `WITH matched AS (
+         SELECT
+           r.*,
+           u.id AS user_id,
+           u.name AS user_name,
+           u.cpf AS user_cpf,
+           u.email AS user_email,
+           u.matricula AS user_matricula,
+           u.cargo AS user_role,
+           u.departamento AS user_department,
+           COALESCE('user:' || u.id::text, 'name:' || lower(trim(r.full_name))) AS group_key
+         FROM registrations r
+         LEFT JOIN LATERAL (
+           SELECT u.*
+           FROM app_users u
+           WHERE lower(trim(u.name)) = lower(trim(r.full_name))
+              OR r.identifier = u.cpf
+              OR r.identifier = regexp_replace(COALESCE(u.cpf, ''), '\\D', '', 'g')
+              OR lower(r.identifier) = lower(COALESCE(u.email, ''))
+              OR r.identifier = u.matricula
+              OR r.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+           ORDER BY
+             CASE WHEN u.matricula IS NULL OR u.matricula = '' THEN 1 ELSE 0 END,
+             CASE
+               WHEN r.identifier = u.cpf
+                 OR r.identifier = regexp_replace(COALESCE(u.cpf, ''), '\\D', '', 'g')
+                 OR lower(r.identifier) = lower(COALESCE(u.email, ''))
+                 OR r.identifier = u.matricula
+                 OR r.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+               THEN 0 ELSE 1
+             END,
+             u.id
+           LIMIT 1
+         ) u ON TRUE
+         WHERE r.course_id = $1 AND r.status = 'approved'
+       ),
+       ranked AS (
+         SELECT
+           *,
+           array_agg(identifier) OVER (PARTITION BY group_key) AS registration_aliases,
+           row_number() OVER (
+             PARTITION BY group_key
+             ORDER BY
+               CASE WHEN user_matricula IS NULL OR user_matricula = '' THEN 1 ELSE 0 END,
+               created_at,
+               id
+           ) AS rn
+         FROM matched
+       )
+       SELECT
+         CASE
+           WHEN user_cpf IS NOT NULL AND user_cpf <> '' THEN regexp_replace(user_cpf, '\\D', '', 'g')
+           WHEN user_email IS NOT NULL AND user_email <> '' THEN lower(user_email)
+           WHEN user_matricula IS NOT NULL AND user_matricula <> '' THEN user_matricula
+           ELSE identifier
+         END AS identifier,
+         COALESCE(user_name, full_name) AS full_name,
+         COALESCE(user_role, role) AS role,
+         COALESCE(user_department, department) AS department,
+         created_at,
+         (
+           SELECT jsonb_agg(DISTINCT alias)
+           FROM unnest(
+             ARRAY[
+               identifier,
+               user_cpf,
+               regexp_replace(COALESCE(user_cpf, ''), '\\D', '', 'g'),
+               lower(user_email),
+               user_matricula,
+               regexp_replace(COALESCE(user_matricula, ''), '\\D', '', 'g')
+             ] || registration_aliases
+           ) AS alias
+           WHERE alias IS NOT NULL AND alias <> ''
+         ) AS aliases
+       FROM ranked
+       WHERE rn = 1
+       ORDER BY full_name, created_at`,
       [req.params.id]
     );
     res.json(rows);
@@ -469,7 +542,7 @@ router.get('/:id/students', authMiddleware, async (req: AuthRequest, res: Respon
   }
 });
 
-// GET /api/courses/:id/enrollment-link — Link de inscrição público
+// GET /api/courses/:id/enrollment-link — Link de inscrição pelo dashboard do aluno
 router.get('/:id/enrollment-link', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const canAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
@@ -478,24 +551,15 @@ router.get('/:id/enrollment-link', authMiddleware, async (req: AuthRequest, res:
       return;
     }
 
-    const link = `${req.protocol}://${req.get('host')}/register/${req.params.id}`;
+    const link = `${req.protocol}://${req.get('host')}/`;
     res.json({ link });
   } catch (err) {
     res.status(500).json({ error: 'Erro ao gerar link' });
   }
 });
 
-// POST /api/courses/:id/enroll — Inscrever aluno
-router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
-  const { identifier } = req.body;
-  const authenticatedUserId = getOptionalUserId(req);
-  if (!identifier && !authenticatedUserId) {
-    res.status(400).json({ error: 'Identificador obrigatório' });
-    return;
-  }
-  const rawIdentifier = String(identifier || '').trim();
-  const clean = normalizeIdentifier(rawIdentifier);
-  const matriculaCandidate = rawIdentifier.toUpperCase();
+// POST /api/courses/:id/enroll — Inscrever aluno logado pelo dashboard
+router.post('/:id/enroll', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { rows: courses } = await pool.query(
       'SELECT id, enrollment_open FROM courses WHERE id = $1',
@@ -510,24 +574,12 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    let users;
-    if (authenticatedUserId) {
-      const result = await pool.query(
-        `SELECT id, name, cpf, email, matricula, departamento, cargo
-         FROM app_users
-         WHERE id = $1`,
-        [authenticatedUserId]
-      );
-      users = result.rows;
-    } else {
-      const result = await pool.query(
-        `SELECT id, name, cpf, email, matricula, departamento, cargo FROM app_users
-         WHERE cpf = $1 OR email = $1 OR matricula = $1 OR matricula = $2`,
-        [clean, matriculaCandidate]
-      );
-      users = result.rows;
-    }
-
+    const { rows: users } = await pool.query(
+      `SELECT id, name, cpf, email, matricula, departamento, cargo
+       FROM app_users
+       WHERE id = $1`,
+      [req.user!.id]
+    );
     if (users.length === 0) {
       res.status(404).json({ error: 'USER_NOT_FOUND' });
       return;

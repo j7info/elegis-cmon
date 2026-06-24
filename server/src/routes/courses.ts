@@ -194,12 +194,12 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
     try {
       await client.query('BEGIN');
 
-      // Update registration with the potentially edited data
       const { rows } = await client.query(
-        `UPDATE registrations 
-         SET status = $1, full_name = $2, role = $3, department = $4
-         WHERE id = $5 AND course_id = $6 RETURNING *`,
-        ['approved', full_name || null, role || null, department || null, registrationId, id]
+        `SELECT *
+         FROM registrations
+         WHERE id = $1 AND course_id = $2
+         FOR UPDATE`,
+        [registrationId, id]
       );
 
       if (rows.length === 0) {
@@ -213,24 +213,9 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
       const emailClean = email?.trim() || (finalIdentifier.includes('@') ? finalIdentifier : null);
       const cpfClean = finalIdentifier.includes('@') ? null : finalIdentifier;
 
-      if (matriculaClean) {
-        const { rows: matriculaConflict } = await client.query(
-          `SELECT id FROM app_users
-           WHERE matricula = $1
-             AND NOT (
-               ($2::text IS NOT NULL AND cpf = $2)
-               OR ($3::text IS NOT NULL AND email = $3)
-             )
-           LIMIT 1`,
-          [matriculaClean, cpfClean, emailClean]
-        );
-
-        if (matriculaConflict.length > 0) {
-          await client.query('ROLLBACK');
-          res.status(409).json({ error: 'Matrícula já cadastrada para outro usuário' });
-          return;
-        }
-      }
+      const { rows: usersByMatricula } = matriculaClean
+        ? await client.query('SELECT * FROM app_users WHERE matricula = $1 LIMIT 1', [matriculaClean])
+        : { rows: [] };
 
       const { rows: existingUsers } = await client.query(
         `SELECT * FROM app_users
@@ -242,7 +227,11 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
         [cpfClean, emailClean, matriculaClean]
       );
 
-      if (existingUsers.length === 0) {
+      const existingByMatricula = usersByMatricula[0];
+      const existingByIdentifier = existingUsers[0];
+      const existing = existingByMatricula || existingByIdentifier;
+
+      if (!existing) {
         const rawPassword = matriculaClean || finalIdentifier;
         const defaultPassword = String(rawPassword).toLowerCase().replace(/[^a-z0-9]/g, '');
         const passwordHash = await bcrypt.hash(defaultPassword || '123456', 12);
@@ -262,11 +251,28 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
           ]
         );
 
-        await client.query('COMMIT');
-        res.json({ message: 'Aprovado e usuário criado', registration: reg });
-      } else {
-        const existing = existingUsers[0];
+        const { rows: [approvedReg] } = await client.query(
+          `UPDATE registrations
+           SET status = 'approved',
+               identifier = $1,
+               full_name = $2,
+               role = $3,
+               department = $4
+           WHERE id = $5 AND course_id = $6
+           RETURNING *`,
+          [
+            finalIdentifier,
+            full_name || reg.full_name,
+            role || reg.role,
+            department || reg.department,
+            registrationId,
+            id,
+          ]
+        );
 
+        await client.query('COMMIT');
+        res.json({ message: 'Aprovado e usuário criado', registration: approvedReg });
+      } else {
         if (matriculaClean && existing.matricula && existing.matricula !== matriculaClean) {
           await client.query('ROLLBACK');
           res.status(409).json({ error: 'Este aluno já possui outra matrícula cadastrada' });
@@ -296,8 +302,61 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
           ]
         );
 
+        const studentIdentifiers = Array.from(new Set(
+          [existing.cpf, existing.email, existing.matricula, finalIdentifier]
+            .filter(Boolean)
+            .map((value: string) => normalizeIdentifier(value))
+        ));
+        const studentIdentifier = studentIdentifiers[0] || finalIdentifier;
+        const studentName = existing.name || full_name || reg.full_name;
+        const studentRole = existing.cargo || role || reg.role;
+        const studentDepartment = existing.departamento || department || reg.department;
+
+        const { rows: matchingRegs } = await client.query(
+          `SELECT id
+           FROM registrations
+           WHERE course_id = $1
+             AND id <> $2
+             AND identifier = ANY($3::text[])
+           LIMIT 1
+           FOR UPDATE`,
+          [id, registrationId, studentIdentifiers]
+        );
+
+        let approvedRegistration;
+        if (matchingRegs.length > 0) {
+          await client.query('DELETE FROM registrations WHERE id = $1', [registrationId]);
+
+          const { rows: [mergedReg] } = await client.query(
+            `UPDATE registrations
+             SET status = 'approved',
+                 identifier = $1,
+                 full_name = $2,
+                 role = $3,
+                 department = $4
+             WHERE id = $5
+             RETURNING *`,
+            [studentIdentifier, studentName, studentRole, studentDepartment, matchingRegs[0].id]
+          );
+
+          approvedRegistration = mergedReg;
+        } else {
+          const { rows: [updatedReg] } = await client.query(
+            `UPDATE registrations
+             SET status = 'approved',
+                 identifier = $1,
+                 full_name = $2,
+                 role = $3,
+                 department = $4
+             WHERE id = $5 AND course_id = $6
+             RETURNING *`,
+            [studentIdentifier, studentName, studentRole, studentDepartment, registrationId, id]
+          );
+          approvedRegistration = updatedReg;
+        }
+
         await client.query('COMMIT');
-        res.json({ message: 'Aprovado com sucesso', registration: reg });
+        res.json({ message: 'Aluno já cadastrado. Inscrição aprovada no curso.', registration: approvedRegistration });
       }
     } catch (err) {
       await client.query('ROLLBACK');

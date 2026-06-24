@@ -69,7 +69,7 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
     }
   }
 
-  const regResult = await pool.query(
+  let regResult = await pool.query(
     `SELECT * FROM registrations WHERE course_id = $1 AND (
       identifier = $2
       OR identifier = $3
@@ -88,7 +88,28 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
   );
 
   if (regResult.rows.length === 0) {
-    return { status: 403, body: { error: 'NOT_ENROLLED', course_id: classData.course_id } };
+    if (!user?.id) {
+      return { status: 403, body: { error: 'NOT_ENROLLED', course_id: classData.course_id } };
+    }
+
+    const registrationIdentifier = user.cpf || user.email
+      ? normalizeIdentifier(user.cpf || user.email)
+      : user.matricula;
+    if (!registrationIdentifier) {
+      return { status: 400, body: { error: 'Cadastro do aluno sem identificador para matrícula no curso.' } };
+    }
+
+    regResult = await pool.query(
+      `INSERT INTO registrations (class_id, course_id, identifier, full_name, role, department, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'approved')
+       ON CONFLICT (course_id, identifier) DO UPDATE SET
+         full_name = EXCLUDED.full_name,
+         role = EXCLUDED.role,
+         department = EXCLUDED.department,
+         status = 'approved'
+       RETURNING *`,
+      [classId, classData.course_id, registrationIdentifier, user.name, user.cargo, user.departamento]
+    );
   }
 
   const knownIdentifiers = Array.from(new Set(

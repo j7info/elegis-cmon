@@ -15,16 +15,6 @@ export function ScanPage() {
   const [needsEnrollment, setNeedsEnrollment] = useState(false);
   const [enrollmentCourseId, setEnrollmentCourseId] = useState('');
   
-  const getDeviceScannedStatus = (currentClassId: string, currentStep: string) => {
-    return localStorage.getItem(`scanned_${currentClassId}_${currentStep}`);
-  };
-
-  const setDeviceScannedStatus = (currentClassId: string, currentStep: string) => {
-    localStorage.setItem(`scanned_${currentClassId}_${currentStep}`, 'true');
-  };
-
-  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
   useEffect(() => {
     async function loadClass() {
       if (!classId || !step) return;
@@ -43,9 +33,6 @@ export function ScanPage() {
             setError('O tempo para registro no QR Code desta etapa esgotou.');
           } else {
             setClassData(data);
-            if (getDeviceScannedStatus(classId, step)) {
-              setSuccess('Você já confirmou sua presença nesta etapa usando este aparelho.');
-            }
           }
         }
       } catch (err) {
@@ -66,10 +53,9 @@ export function ScanPage() {
     
     try {
       const result = await api.post(`/classes/${classId}/scan/${step}`, {
-        identifier: normalizeIdentifier(identifier),
+        identifier: identifier.trim(),
       });
       
-      setDeviceScannedStatus(classId, step);
       setSuccess(result.message || `${result.full_name}, sua presença foi confirmada!`);
     } catch (err: any) {
       if (err.message === 'USER_NOT_FOUND') {
@@ -87,7 +73,7 @@ export function ScanPage() {
   };
 
   const handleEnrollAndScan = async () => {
-    const cleanIdentifier = normalizeIdentifier(identifier);
+    const cleanIdentifier = identifier.trim();
     if (!enrollmentCourseId || !cleanIdentifier) return;
     setLoading(true);
     try {
@@ -96,7 +82,6 @@ export function ScanPage() {
       // 2. Tenta registrar presença novamente
       const result = await api.post(`/classes/${classId}/scan/${step}`, { identifier: cleanIdentifier });
       
-      setDeviceScannedStatus(classId || '', step || '');
       setNeedsEnrollment(false);
       setSuccess(result.message || `${result.full_name}, sua inscrição e presença foram confirmadas!`);
     } catch (err: any) {

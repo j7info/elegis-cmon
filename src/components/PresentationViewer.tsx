@@ -9,6 +9,11 @@ import { useSettings } from '../lib/useSettings';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+const MAX_SLIDE_DIMENSION = 4096;
+const MAX_RENDER_SCALE = 4;
+const MIN_RENDER_SCALE = 2.5;
+const SLIDE_JPEG_QUALITY = 0.92;
+
 interface PresentationViewerProps {
   file: File;
   onClose: () => void;
@@ -69,19 +74,32 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
             continue;
           }
           
-          const viewport = page.getViewport({ scale: 1.0 });
+          const baseViewport = page.getViewport({ scale: 1.0 });
+          const deviceScale = Math.max(window.devicePixelRatio || 1, 1);
+          const targetWidth = Math.max(window.screen?.width || window.innerWidth || 2560, window.innerWidth || 0) * deviceScale;
+          const targetHeight = Math.max(window.screen?.height || window.innerHeight || 1440, window.innerHeight || 0) * deviceScale;
+          const fitScale = Math.max(targetWidth / baseViewport.width, targetHeight / baseViewport.height);
+          const dimensionScale = Math.min(
+            MAX_RENDER_SCALE,
+            MAX_SLIDE_DIMENSION / baseViewport.width,
+            MAX_SLIDE_DIMENSION / baseViewport.height
+          );
+          const renderScale = Math.min(Math.max(fitScale, MIN_RENDER_SCALE), dimensionScale);
+          const viewport = page.getViewport({ scale: renderScale });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           
           if (!context) continue;
           
-          canvas.width = Math.min(viewport.width, 4096);
-          canvas.height = Math.min(viewport.height, 4096);
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = 'high';
           
           try {
             // @ts-ignore
             await page.render({ canvasContext: context, viewport }).promise;
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            const dataUrl = canvas.toDataURL('image/jpeg', SLIDE_JPEG_QUALITY);
             generatedSlides.push(dataUrl);
           } catch (e) {
             console.warn('Erro ao renderizar página', i, e);

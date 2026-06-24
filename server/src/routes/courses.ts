@@ -31,7 +31,7 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
 }
 
 function studentIdentifiersCondition(alias: string) {
-  return `(${alias}.identifier = u.cpf OR ${alias}.identifier = u.email OR ${alias}.identifier = u.matricula)`;
+  return `(${alias}.identifier = u.cpf OR ${alias}.identifier = u.email OR ${alias}.identifier = u.matricula OR ${alias}.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g'))`;
 }
 
 // GET /api/courses — Listar cursos do usuário (owner ou adicional)
@@ -358,12 +358,14 @@ router.post('/:id/approve-registration/:registrationId', authMiddleware, async (
           ]
         );
 
+        const studentIdentifier = existing.cpf || existing.email
+          ? normalizeIdentifier(existing.cpf || existing.email)
+          : (existing.matricula || finalIdentifier);
         const studentIdentifiers = Array.from(new Set(
-          [existing.cpf, existing.email, existing.matricula, finalIdentifier]
+          [studentIdentifier, existing.cpf, existing.email, existing.matricula, finalIdentifier, normalizeIdentifier(finalIdentifier)]
             .filter(Boolean)
-            .map((value: string) => normalizeIdentifier(value))
+            .map((value: string) => String(value))
         ));
-        const studentIdentifier = studentIdentifiers[0] || finalIdentifier;
         const studentName = existing.name || full_name || reg.full_name;
         const studentRole = existing.cargo || role || reg.role;
         const studentDepartment = existing.departamento || department || reg.department;
@@ -472,7 +474,9 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Identificador obrigatório' });
     return;
   }
-  const clean = normalizeIdentifier(identifier);
+  const rawIdentifier = String(identifier).trim();
+  const clean = normalizeIdentifier(rawIdentifier);
+  const matriculaCandidate = rawIdentifier.toUpperCase();
   try {
     const { rows: courses } = await pool.query(
       'SELECT id, enrollment_open FROM courses WHERE id = $1',
@@ -489,9 +493,9 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
 
     // 1. Busca aluno (normaliza também o valor do banco)
     const { rows: users } = await pool.query(
-      `SELECT id, name, cpf, email, departamento, cargo FROM app_users
-       WHERE cpf = $1 OR email = $1 OR matricula = $1`,
-      [clean]
+      `SELECT id, name, cpf, email, matricula, departamento, cargo FROM app_users
+       WHERE cpf = $1 OR email = $1 OR matricula = $1 OR matricula = $2`,
+      [clean, matriculaCandidate]
     );
     if (users.length === 0) {
       res.status(404).json({ error: 'USER_NOT_FOUND' });
@@ -500,7 +504,9 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
     const user = users[0];
 
     // 2. Registra com identificador normalizado
-    const storedIdentifier = normalizeIdentifier(user.cpf || user.email || user.matricula);
+    const storedIdentifier = user.cpf || user.email
+      ? normalizeIdentifier(user.cpf || user.email)
+      : user.matricula;
     await pool.query(
       `INSERT INTO registrations (course_id, identifier, full_name, role, department)
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (course_id, identifier) DO NOTHING`,

@@ -20,7 +20,9 @@ function stepQrColumn(step: AttendanceStep) {
 }
 
 async function registerAttendance(classId: string, step: AttendanceStep, rawIdentifier: string) {
-  const cleanIdentifier = normalizeIdentifier(rawIdentifier);
+  const identifierText = String(rawIdentifier).trim();
+  const cleanIdentifier = normalizeIdentifier(identifierText);
+  const matriculaCandidate = identifierText.toUpperCase();
 
   const classResult = await pool.query('SELECT * FROM classes WHERE id = $1', [classId]);
   if (classResult.rows.length === 0) {
@@ -49,13 +51,16 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
     return { status: 400, body: { error: 'O tempo para registro no QR Code desta etapa esgotou.' } };
   }
 
-  const userResult = await pool.query('SELECT * FROM app_users WHERE cpf = $1 OR email = $1 OR matricula = $1', [cleanIdentifier]);
+  const userResult = await pool.query(
+    'SELECT * FROM app_users WHERE cpf = $1 OR email = $1 OR matricula = $1 OR matricula = $2',
+    [cleanIdentifier, matriculaCandidate]
+  );
   let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
 
   if (!user) {
     const courseReg = await pool.query(
-      'SELECT full_name as name, role as cargo, department as departamento FROM registrations WHERE course_id = $1 AND identifier = $2 LIMIT 1',
-      [classData.course_id, cleanIdentifier]
+      'SELECT full_name as name, role as cargo, department as departamento FROM registrations WHERE course_id = $1 AND (identifier = $2 OR identifier = $3) LIMIT 1',
+      [classData.course_id, cleanIdentifier, matriculaCandidate]
     );
     if (courseReg.rows.length > 0) {
       user = courseReg.rows[0];
@@ -67,13 +72,19 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
   const regResult = await pool.query(
     `SELECT * FROM registrations WHERE course_id = $1 AND (
       identifier = $2
+      OR identifier = $3
       OR EXISTS (
         SELECT 1 FROM app_users u
-        WHERE (u.cpf = $2 OR u.email = $2 OR u.matricula = $2)
-           AND (registrations.identifier = u.cpf OR registrations.identifier = u.email OR registrations.identifier = u.matricula)
+        WHERE (u.cpf = $2 OR u.email = $2 OR u.matricula = $2 OR u.matricula = $3)
+           AND (
+             registrations.identifier = u.cpf
+             OR registrations.identifier = u.email
+             OR registrations.identifier = u.matricula
+             OR registrations.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+           )
       )
     )`,
-    [classData.course_id, cleanIdentifier]
+    [classData.course_id, cleanIdentifier, matriculaCandidate]
   );
 
   if (regResult.rows.length === 0) {
@@ -81,11 +92,14 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
   }
 
   const knownIdentifiers = Array.from(new Set(
-    [cleanIdentifier, user.cpf, user.email, user.matricula, ...regResult.rows.map((reg: any) => reg.identifier)]
+    [cleanIdentifier, matriculaCandidate, user.cpf, user.email, user.matricula, ...regResult.rows.map((reg: any) => reg.identifier)]
       .filter(Boolean)
-      .map((value: string) => normalizeIdentifier(value))
+      .flatMap((value: string) => [value, normalizeIdentifier(value)])
   ));
   const scanColumn = stepScanColumn(step);
+  const attendanceIdentifier = user.cpf || user.email
+    ? normalizeIdentifier(user.cpf || user.email)
+    : (user.matricula || matriculaCandidate);
 
   const attResult = await pool.query(
     'SELECT * FROM attendances WHERE class_id = $1 AND identifier = ANY($2::text[]) ORDER BY updated_at DESC NULLS LAST, created_at DESC LIMIT 1',
@@ -96,7 +110,7 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
     await pool.query(
       `INSERT INTO attendances (class_id, identifier, full_name, role, department, ${scanColumn})
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [classId, cleanIdentifier, user.name, user.cargo, user.departamento, Date.now()]
+      [classId, attendanceIdentifier, user.name, user.cargo, user.departamento, Date.now()]
     );
   } else {
     await pool.query(

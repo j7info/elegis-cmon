@@ -294,8 +294,8 @@ export function PresentationViewer({ file, onClose, classId, appUrl, attendances
       return !!a.scan_end;
     })
     .sort((a, b) => {
-      const aTime = persistentQR.step === 'start' ? a.scan_start : persistentQR.step === 'middle' ? a.scan_middle : a.scan_end;
-      const bTime = persistentQR.step === 'start' ? b.scan_start : persistentQR.step === 'middle' ? b.scan_middle : b.scan_end;
+      const aTime = activeQrStep === 'start' ? a.scan_start : activeQrStep === 'middle' ? a.scan_middle : a.scan_end;
+      const bTime = activeQrStep === 'start' ? b.scan_start : activeQrStep === 'middle' ? b.scan_middle : b.scan_end;
       return bTime - aTime; // descending
     })
     .slice(0, 8) : []; // Max 8 recent names

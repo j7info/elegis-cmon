@@ -43,7 +43,12 @@ async function userCanAccessCourse(courseId: string | number, userId: number, ro
   const { rows: studentRows } = await pool.query(
     `SELECT 1
      FROM registrations r
-     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
+     INNER JOIN app_users u ON (
+       r.identifier = u.cpf
+       OR r.identifier = u.email
+       OR r.identifier = u.matricula
+       OR r.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+     )
      WHERE r.course_id = $1 AND u.id = $2
      LIMIT 1`,
     [courseId, userId]
@@ -60,7 +65,12 @@ async function userCanAccessClass(classId: string, userId: number, role: string)
      LEFT JOIN app_users u ON u.id = $3
      LEFT JOIN registrations r
        ON r.course_id = c.id
-      AND (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
+      AND (
+        r.identifier = u.cpf
+        OR r.identifier = u.email
+        OR r.identifier = u.matricula
+        OR r.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+      )
      WHERE cl.id = $1
        AND ($2 = 'ADMIN' OR cl.owner_id = $3 OR cl.auxiliary_teacher_id = $3 OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL)
      LIMIT 1`,

@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const minSeconds = Math.max(0, Number(urlParams.get('min_seconds')) || 0);
     const reviewMode = urlParams.get('review') === '1';
     const unlockedFromSystem = Math.max(0, Math.min(totalSlides, Number(urlParams.get('unlocked_slides')) || 0));
+    let lockTimer = null;
     let remainingSeconds = 0;
 
     // Elementos da UI
@@ -68,6 +69,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const newIndex = currentStepIndex + delta;
         
         if (newIndex >= 0 && newIndex < totalSteps) {
+            if (delta > 0 && !canLeaveCurrentSlide(newIndex)) {
+                return;
+            }
+
             const nextSlideIndex = slideIndexes[newIndex];
             if (delta > 0 && nextSlideIndex > currentSlideIndex) {
                 postSlideEnd(currentStepIndex);
@@ -75,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             currentStepIndex = newIndex;
             updateUI();
-        } else if (newIndex >= totalSteps) {
+        } else if (newIndex >= totalSteps && canLeaveCurrentSlide(newIndex)) {
             postSlideEnd(currentStepIndex);
             finishScreen.classList.remove('hidden');
         }
@@ -91,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (slideChanged) {
             postSlideStart();
-            unlockCurrentSlide();
+            startSlideLock();
         }
         
         // Animação de fade do texto
@@ -129,19 +134,62 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function unlockCurrentSlide() {
-        unlockedSlides.add(currentSlideIndex);
-        remainingSeconds = 0;
+    function getNextStepSlideIndex() {
+        if (currentStepIndex >= totalSteps - 1) return currentSlideIndex + 1;
+        return slideIndexes[currentStepIndex + 1];
+    }
+
+    function canLeaveCurrentSlide(nextIndex) {
+        const nextSlideIndex = nextIndex >= totalSteps
+            ? currentSlideIndex + 1
+            : slideIndexes[nextIndex];
+
+        return reviewMode || nextSlideIndex === currentSlideIndex || unlockedSlides.has(currentSlideIndex);
+    }
+
+    function startSlideLock() {
+        if (lockTimer) {
+            clearInterval(lockTimer);
+            lockTimer = null;
+        }
+
+        if (reviewMode || minSeconds === 0 || unlockedSlides.has(currentSlideIndex)) {
+            unlockedSlides.add(currentSlideIndex);
+            remainingSeconds = 0;
+            updateNextButtonState();
+            postViewProgress();
+            return;
+        }
+
+        remainingSeconds = minSeconds;
         updateNextButtonState();
         postViewProgress();
+
+        lockTimer = setInterval(() => {
+            remainingSeconds = Math.max(0, remainingSeconds - 1);
+
+            if (remainingSeconds === 0) {
+                unlockedSlides.add(currentSlideIndex);
+                clearInterval(lockTimer);
+                lockTimer = null;
+            }
+
+            updateNextButtonState();
+            postViewProgress();
+        }, 1000);
     }
 
     function updateNextButtonState() {
         const isLastStep = currentStepIndex === totalSteps - 1;
+        const nextSlideIndex = getNextStepSlideIndex();
+        const leavingSlide = nextSlideIndex !== currentSlideIndex;
+        const locked = leavingSlide && !canLeaveCurrentSlide(currentStepIndex + 1);
 
-        btnNext.disabled = false;
+        btnNext.disabled = locked;
 
-        if (isLastStep) {
+        if (locked) {
+            btnNext.textContent = `Aguarde ${remainingSeconds}s`;
+        } else if (isLastStep) {
             btnNext.textContent = "Concluir";
         } else {
             btnNext.textContent = "Próximo";
@@ -204,7 +252,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Função Exigida pelo Módulo: Enviar mensagem para o iFrame pai (score: 100)
     function finishLesson() {
+        if (!canLeaveCurrentSlide(totalSteps)) return;
+
         postSlideEnd(currentStepIndex);
+        if (lockTimer) {
+            clearInterval(lockTimer);
+            lockTimer = null;
+        }
 
         if (window.parent && window.parent !== window) {
             postMessageToParent('LESSON_PROGRESS', {

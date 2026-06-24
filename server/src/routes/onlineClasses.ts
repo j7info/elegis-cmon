@@ -297,6 +297,60 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
 });
 
 // POST /api/classes/:id/online/advance — Avançar para o próximo slide
+router.post('/:id/online/slide-start', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { identifier, slide_index } = req.body;
+
+  if (!identifier?.trim()) {
+    res.status(400).json({ error: 'Identificador é obrigatório' });
+    return;
+  }
+
+  const targetSlide = Math.max(0, Math.floor(Number(slide_index) || 0));
+  if (targetSlide <= 0) {
+    res.status(400).json({ error: 'Slide inválido' });
+    return;
+  }
+
+  try {
+    const identifiers = await resolveStudentIdentifiers(identifier);
+    const existingProgress = await findBestOnlineProgress(id, identifiers, true);
+
+    if (!existingProgress) {
+      res.status(404).json({ error: 'Sessão não encontrada. Faça join primeiro.' });
+      return;
+    }
+
+    if (existingProgress.completed_at) {
+      res.status(400).json({ error: 'Esta aula já foi concluída' });
+      return;
+    }
+
+    if (targetSlide <= existingProgress.current_slide) {
+      res.json({ progress: existingProgress, already_recorded: true });
+      return;
+    }
+
+    if (targetSlide > existingProgress.current_slide + 1) {
+      res.status(409).json({ error: 'Conclua os slides anteriores antes de avançar' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE class_online_progress
+       SET slide_started_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [existingProgress.id]
+    );
+
+    res.json({ progress: rows[0], slide_index: targetSlide });
+  } catch (err) {
+    console.error('Online slide start error:', err);
+    res.status(500).json({ error: 'Erro ao iniciar contagem do slide' });
+  }
+});
+
 router.post('/:id/online/advance', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { identifier, slide_index } = req.body;
@@ -335,11 +389,12 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
       return;
     }
 
-    const isInteractiveSlideEvent = requestedSlide > 0;
+    if (requestedSlide > 0 && targetSlide > prog.current_slide + 1) {
+      res.status(409).json({ error: 'Conclua os slides anteriores antes de avançar' });
+      return;
+    }
 
-    // Verifica tempo mínimo no slide atual apenas para o leitor online padrão.
-    // Aulas interativas HTML navegam livremente; elas só emitem o slide visto
-    // e o sistema registra o histórico.
+    // Verifica tempo mínimo no slide atual.
     const { rows: classes } = await pool.query(
       'SELECT slide_minimum_seconds FROM classes WHERE id = $1',
       [id]
@@ -347,7 +402,7 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
     const minSecs = classes[0]?.slide_minimum_seconds ?? 30;
     const elapsed = (Date.now() - new Date(prog.slide_started_at).getTime()) / 1000;
 
-    if (!isInteractiveSlideEvent && elapsed < minSecs) {
+    if (elapsed < minSecs) {
       const falta = Math.ceil(minSecs - elapsed);
       res.status(429).json({
         error: `Aguarde mais ${falta} segundo(s) para avançar`,
@@ -358,9 +413,9 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
       return;
     }
 
-    // Para aulas interativas, a métrica é o avanço de slides confirmado pelo sistema.
-    // Para o leitor online padrão, preserva-se o tempo mínimo por slide.
-    const timeOnSlide = isInteractiveSlideEvent ? minSecs : Math.min(Math.floor(elapsed), minSecs);
+    // Adiciona no máximo o tempo mínimo exigido para evitar inflar presença
+    // quando o aluno volta dias depois a uma sessão já iniciada.
+    const timeOnSlide = Math.min(Math.floor(elapsed), minSecs);
     const newTotalTime = prog.total_time_spent_seconds + timeOnSlide;
     const nextSlide = Math.max(prog.current_slide + 1, targetSlide);
 

@@ -31,6 +31,7 @@ export function InteractiveLessonPage() {
   const [reviewMode, setReviewMode] = useState(false);
   const [onlineEvalState, setOnlineEvalState] = useState<any>(null);
   const [interactiveProgress, setInteractiveProgress] = useState<any>(null);
+  const [htmlFrameUrl, setHtmlFrameUrl] = useState('');
   const [selectedAlternativeId, setSelectedAlternativeId] = useState<number | null>(null);
   const [evalTimerLeft, setEvalTimerLeft] = useState<number | null>(null);
   const [evalSubmitting, setEvalSubmitting] = useState(false);
@@ -70,9 +71,39 @@ export function InteractiveLessonPage() {
     if (classId) fetchConfig();
   }, [classId]);
 
+  const buildHtmlUrl = useCallback((progress = interactiveProgress, forcedReviewMode = reviewMode) => {
+    if (!config) return '';
+    const apiBase = import.meta.env.VITE_API_URL || '/api';
+    const rawUrl = String(config.html_url || '').replace(/^\/api/, apiBase);
+    const separator = rawUrl.includes('?') ? '&' : '?';
+    const minSeconds = Math.max(0, Number(config.slide_minimum_seconds ?? 0) || 0);
+    const unlockedSlides = Math.max(0, Number(progress?.current_slide ?? 0) || 0);
+    const params = new URLSearchParams({
+      min_seconds: String(minSeconds),
+      review: forcedReviewMode ? '1' : '0',
+      unlocked_slides: String(unlockedSlides),
+    });
+    return `${rawUrl}${separator}${params.toString()}`;
+  }, [config, interactiveProgress, reviewMode]);
+
   useEffect(() => {
     const handler = async (e: MessageEvent) => {
       if (step !== 'viewing') return;
+
+      if (e.data?.type === 'INTERACTIVE_SLIDE_START') {
+        if (reviewMode || e.data.data?.review_mode) return;
+
+        try {
+          const res = await api.post(`/classes/${classId}/online/slide-start`, {
+            identifier,
+            slide_index: e.data.data?.slide_index,
+          });
+          if (res?.progress) setInteractiveProgress(res.progress);
+        } catch (err) {
+          console.warn('Interactive slide start was not recorded', err);
+        }
+        return;
+      }
 
       if (e.data?.type === 'INTERACTIVE_SLIDE_END') {
         if (reviewMode || e.data.data?.review_mode) return;
@@ -122,10 +153,12 @@ export function InteractiveLessonPage() {
         identifier: identifier.trim(),
         full_name: fullName.trim(),
       });
+      let loadedProgress: any = null;
       // Try to check state to see if it's already completed
       try {
         const stateRes = await api.get(`/classes/${classId}/interactive/state?identifier=${encodeURIComponent(identifier.trim())}`);
-        setInteractiveProgress(stateRes.progress || null);
+        loadedProgress = stateRes.progress || null;
+        setInteractiveProgress(loadedProgress);
         if (stateRes.progress?.completed_at) {
           setReviewMode(false);
           setStep('completed');
@@ -136,6 +169,7 @@ export function InteractiveLessonPage() {
       }
       
       setReviewMode(false);
+      setHtmlFrameUrl(buildHtmlUrl(loadedProgress, false));
       setStep('viewing');
     } catch (err: any) {
       setJoinError(err?.message || 'Erro ao acessar aula');
@@ -217,20 +251,6 @@ export function InteractiveLessonPage() {
   if (loading) return <div translate="no" className="notranslate p-8 text-center text-gray-500 flex items-center justify-center min-h-screen"><Loader2 className="w-8 h-8 animate-spin text-teal-600" /></div>;
   if (error) return <div translate="no" className="notranslate p-8 text-center text-red-600 min-h-screen flex items-center justify-center">{error}</div>;
   if (!config) return null;
-
-  const buildHtmlUrl = () => {
-    const apiBase = import.meta.env.VITE_API_URL || '/api';
-    const rawUrl = String(config.html_url || '').replace(/^\/api/, apiBase);
-    const separator = rawUrl.includes('?') ? '&' : '?';
-    const minSeconds = Math.max(0, Number(config.slide_minimum_seconds ?? 0) || 0);
-    const unlockedSlides = Math.max(0, Number(interactiveProgress?.current_slide ?? 0) || 0);
-    const params = new URLSearchParams({
-      min_seconds: String(minSeconds),
-      review: reviewMode ? '1' : '0',
-      unlocked_slides: String(unlockedSlides),
-    });
-    return `${rawUrl}${separator}${params.toString()}`;
-  };
 
   if (step === 'join') {
     return (
@@ -335,6 +355,7 @@ export function InteractiveLessonPage() {
             <button
               onClick={() => {
                 setReviewMode(true);
+                setHtmlFrameUrl(buildHtmlUrl(interactiveProgress, true));
                 setStep('viewing');
               }}
               className="block w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold transition-colors"
@@ -494,7 +515,7 @@ export function InteractiveLessonPage() {
         <div className="flex-1 w-full relative">
           {config.html_url ? (
             <iframe
-              src={buildHtmlUrl()}
+              src={htmlFrameUrl || buildHtmlUrl()}
               className="absolute top-0 left-0 w-full h-full border-none"
               sandbox="allow-scripts allow-forms allow-popups"
               title="Aula Interativa"

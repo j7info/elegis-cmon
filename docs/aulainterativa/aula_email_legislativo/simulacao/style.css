@@ -1,0 +1,234 @@
+:root {
+    --primary-color: #3b82f6;
+    --primary-hover: #2563eb;
+    --secondary-color: #4b5563;
+    --secondary-hover: #374151;
+    --success-color: #10b981;
+    --success-hover: #059669;
+    --text-main: #f9fafb;
+    --text-muted: #d1d5db;
+    --bg-dark: #111827;
+    --bg-panel: #1f2937;
+    --border-color: rgba(255, 255, 255, 0.1);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+#app {
+    display: flex;
+    flex-direction: row;
+    width: 100vw;
+    height: 100vh;
+}
+
+/* Esquerda - Imagem */
+.main-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 20px;
+    background-color: #0f172a;
+    overflow: hidden;
+}
+
+#image-container {
+    position: relative;
+    display: flex;
+}
+
+#step-image {
+    max-width: 100%;
+    max-height: calc(100vh - 40px);
+    display: block;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    border-radius: 8px;
+    transition: opacity 0.3s ease;
+}
+
+/* Direita - Painel lateral */
+.side-panel {
+    width: 450px;
+    min-width: 450px;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 40px;
+    box-shadow: -10px 0 30px rgba(0,0,0,0.6);
+    z-index: 20;
+}
+
+.panel-header {
+    margin-bottom: 30px;
+    flex-shrink: 0;
+}
+
+.progress-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--primary-color);
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.step-counter {
+    font-size: 1rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.content-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    overflow-y: auto;
+}
+
+.step-text {
+    font-size: 1.25rem;
+    line-height: 1.7;
+    color: #fff;
+    transition: opacity 0.2s ease;
+}
+
+.controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    margin-top: 30px;
+    flex-shrink: 0;
+}
+
+/* Botoes */
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'Inter', sans-serif;
+    flex: 1;
+}
+
+.btn-primary { background: var(--primary-color); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-secondary { background: var(--secondary-color); color: white; }
+.btn-secondary:hover { background: var(--secondary-hover); }
+
+.btn-success { background: var(--success-color); color: white; }
+.btn-success:hover { background: var(--success-hover); }
+
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Finish Screen */
+.finish-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 23, 42, 0.95);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transition: opacity 0.4s ease;
+}
+
+.finish-card {
+    background: #1e293b;
+    padding: 50px;
+    border-radius: 16px;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    border: 1px solid var(--border-color);
+    max-width: 600px;
+}
+
+.finish-card h2 { color: var(--success-color); font-size: 3rem; margin-bottom: 20px; }
+.finish-card p { font-size: 1.3rem; color: var(--text-muted); margin-bottom: 40px; }
+
+.hidden { opacity: 0 !important; pointer-events: none !important; }
+
+/* ========================================================= */
+/* RESPONSIVIDADE (Telas Menores / Mobile)                   */
+/* ========================================================= */
+@media (max-width: 900px) {
+    #app {
+        flex-direction: column;
+    }
+
+    .main-content {
+        flex: unset;
+        height: 50vh; /* Ocupa metade da tela */
+        min-height: 50vh;
+        padding: 15px;
+    }
+
+    #step-image {
+        max-height: calc(50vh - 30px);
+    }
+
+    .side-panel {
+        width: 100%;
+        min-width: unset;
+        flex: 1; /* Ocupa a outra metade da tela */
+        height: 50vh;
+        border-left: none;
+        border-top: 1px solid var(--border-color);
+        box-shadow: 0 -10px 20px rgba(0,0,0,0.5);
+        padding: 20px;
+    }
+
+    .panel-header {
+        margin-bottom: 15px;
+    }
+
+    .step-text {
+        font-size: 1.1rem; /* Um pouco menor para caber melhor */
+    }
+
+    .controls {
+        margin-top: 15px;
+    }
+
+    .finish-card {
+        margin: 20px;
+        padding: 30px 20px;
+    }
+
+    .finish-card h2 {
+        font-size: 2rem;
+    }
+
+    .finish-card p {
+        font-size: 1.1rem;
+    }
+}

@@ -41,8 +41,20 @@ curl -X POST http://localhost:8080/api/classes/ID_DA_AULA/interactive \
 
 Utilize esta modalidade para simular sistemas externos (como Excel, Word), mini-jogos, ou dashboards em HTML puro sem mexer no código-fonte em React.
 
+### Padrão Recomendado: Tutorial Guiado (Screenshots + Legendas)
+
+Para criar aulas baseadas na exibição passo a passo de telas de sistemas (ex: webmail, SEI, planilhas), o padrão recomendado é um layout interativo com a seguinte estrutura:
+- **Desktop:** Layout em linha (`flex-direction: row`). A imagem se autoajusta no lado esquerdo da tela e um painel lateral escuro para o texto fica fixo à direita.
+- **Mobile (Responsividade Obrigatória):** Em telas menores (ex: `max-width: 900px`), o layout deve alterar para coluna (`flex-direction: column`). A imagem deve ocupar cerca de `50vh` no topo, e o painel de texto deve ficar nos `50vh` inferiores, garantindo que o texto nunca sobreponha a imagem e permitindo leitura confortável sem cortes.
+- **Conteúdo:** Use um arquivo `data.js` como fonte dos passos, contendo ao menos `text` e `image`. O fluxo mais estável para screenshots é exibir apenas a tela e o texto explicativo, sem indicadores sobrepostos.
+- **Identificação de slides:** Em aulas baseadas em prints, cada imagem deve ser tratada como um slide. Se vários textos explicam o mesmo print, eles são passos de leitura dentro do mesmo slide, não slides diferentes. O script deve agrupar passos consecutivos com o mesmo `image`, contar o progresso por imagem e registrar início/fim apenas quando o print muda.
+- **Tempo mínimo por slide:** Leia `min_seconds` da URL enviada pelo sistema pai. Permita navegar livremente entre textos do mesmo print, mas bloqueie a saída para o próximo print até cumprir o tempo mínimo definido pelo professor. Em `review=1`, a navegação deve ser livre e não deve registrar novo progresso.
+- **Eventos para o sistema pai:** Ao abrir um print, envie `INTERACTIVE_SLIDE_START`. Ao sair de um print pela primeira vez, envie `INTERACTIVE_SLIDE_END`. Durante a leitura, envie `INTERACTIVE_VIEW_PROGRESS` com `viewed_slides`, `total_slides`, `current_slide`, `current_step`, `total_steps` e `remaining_seconds`. No final, continue enviando `LESSON_PROGRESS` com `score: 100`.
+- **Indicação visual:** Evite setas, círculos, spotlight ou coordenadas sobre a imagem até existir uma tecnologia de marcação mais confiável. Em prints de sistemas reais, pequenos deslocamentos prejudicam a aula; prefira explicar no texto qual região o aluno deve observar.
+
 ### Passo 1: Desenvolver a Simulação
-Crie uma pasta local e desenvolva seu HTML, CSS e JavaScript livremente.
+Crie uma pasta local e desenvolva seu HTML, CSS e JavaScript seguindo essas regras essenciais:
+
 - O arquivo principal **DEVE** se chamar `index.html`.
 - Você pode adicionar pastas de imagens ou scripts (ex: `style.css`, `script.js`).
 - Use caminhos relativos para assets: `./assets/tela-01.png`, `./script.js`, `./style.css`.
@@ -62,18 +74,14 @@ Exemplo que quebra a aula com `SyntaxError: Invalid or unexpected token`:
 card.className = \`card \${ativo ? 'card-ativo' : 'card-inativo'}\`;
 ```
 
-**Exemplo básico do index.html:**
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <style> body { font-family: sans-serif; background: #f0f0f0; padding: 20px; } </style>
-</head>
-<body>
-  <h1>Minha Simulação</h1>
-  <button onclick="alert('Funciona!')">Clique-me</button>
-</body>
-</html>
+**Exemplo básico de arquivos (Tutorial Guiado):**
+```text
+sua_simulacao/
+├── index.html (contém o #image-container na esquerda e .side-panel na direita)
+├── style.css  (responsividade flexbox @media(max-width:900px))
+├── script.js  (lógica de passar os passos, carregar imagens e emitir o score:100)
+├── data.js    (const lessonData = [{ text: "...", image: "tela.png" }])
+└── assets/    (todas as imagens)
 ```
 
 ### Passo 2: Validar antes de empacotar

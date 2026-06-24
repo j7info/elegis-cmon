@@ -72,6 +72,22 @@ export function InteractiveLessonPage() {
   useEffect(() => {
     const handler = async (e: MessageEvent) => {
       if (step !== 'viewing') return;
+
+      if (e.data?.type === 'INTERACTIVE_SLIDE_END') {
+        if (reviewMode || e.data.data?.review_mode) return;
+
+        try {
+          await api.post(`/classes/${classId}/online/advance`, {
+            identifier,
+          });
+        } catch (err: any) {
+          // The iframe enforces the same minimum time locally. If the backend
+          // rejects a duplicate/late event, keep the lesson usable and log it.
+          console.warn('Interactive slide progress was not recorded', err);
+        }
+        return;
+      }
+
       if (e.data?.type === 'INTERACTIVE_COMPLETE' || e.data?.type === 'LESSON_PROGRESS') {
         if (e.data.data?.score === 100 || !e.data.data?.score) {
           try {
@@ -89,7 +105,7 @@ export function InteractiveLessonPage() {
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [classId, step, identifier]);
+  }, [classId, step, identifier, reviewMode]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();

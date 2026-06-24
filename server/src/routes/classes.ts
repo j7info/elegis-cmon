@@ -209,6 +209,7 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
     const setClauses: string[] = ['updated_at = NOW()'];
     const values: any[] = [];
     let paramIdx = 1;
+    let clearsVideoFields = false;
 
     if (title !== undefined) {
       setClauses.push(`title = $${paramIdx++}`);
@@ -275,10 +276,11 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
       setClauses.push(`online_content_type = $${paramIdx++}`);
       values.push(contentType);
       if (contentType === 'slides') {
+        clearsVideoFields = true;
         setClauses.push('video_url = NULL', 'video_provider = NULL', 'video_id = NULL', 'video_duration_seconds = NULL');
       }
     }
-    if (video_url !== undefined) {
+    if (video_url !== undefined && !clearsVideoFields) {
       const videoId = parseYouTubeVideoId(video_url);
       if (video_url && !videoId) {
         res.status(400).json({ error: 'Informe uma URL valida do YouTube' });
@@ -291,7 +293,7 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
       setClauses.push(`video_id = $${paramIdx++}`);
       values.push(videoId);
     }
-    if (video_duration_seconds !== undefined) {
+    if (video_duration_seconds !== undefined && !clearsVideoFields) {
       setClauses.push(`video_duration_seconds = $${paramIdx++}`);
       values.push(video_duration_seconds);
     }

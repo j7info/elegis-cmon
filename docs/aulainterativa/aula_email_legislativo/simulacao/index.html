@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aula Interativa - E-mail Legislativo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <div id="app">
+        
+        <!-- Lado Esquerdo: Área principal da Imagem -->
+        <div class="main-content">
+            <!-- Container que se ajusta exatamente ao tamanho da imagem -->
+            <div id="image-container">
+                <img id="step-image" src="" alt="Tela da Aula">
+            </div>
+        </div>
+
+        <!-- Lado Direito: Painel de Texto e Controles -->
+        <div class="side-panel">
+            <div class="panel-header">
+                <div class="progress-container">
+                    <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                <span id="step-counter" class="step-counter">1 / 318</span>
+            </div>
+            
+            <div class="content-wrapper">
+                <p id="step-text" class="step-text"></p>
+            </div>
+            
+            <div class="controls">
+                <button id="btn-prev" class="btn btn-secondary">Anterior</button>
+                <button id="btn-next" class="btn btn-primary">Próximo</button>
+            </div>
+        </div>
+
+        <!-- Tela Final -->
+        <div id="finish-screen" class="finish-screen hidden">
+            <div class="finish-card">
+                <h2>Parabéns!</h2>
+                <p>Você concluiu o treinamento do E-mail Legislativo com sucesso.</p>
+                <button id="btn-finish" class="btn btn-success">Finalizar Aula</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Dados extraídos do markdown -->
+    <script src="./data.js"></script>
+    <script src="./script.js"></script>
+</body>
+</html>

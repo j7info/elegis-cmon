@@ -1,8 +1,9 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcrypt';
 import pool from '../db/pool.js';
-import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware } from '../middleware/auth.js';
+import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware, JWT_SECRET } from '../middleware/auth.js';
 import { normalizeIdentifier } from '../lib/identifier.js';
+import jwt from 'jsonwebtoken';
 
 const router = Router();
 
@@ -32,6 +33,17 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
 
 function studentIdentifiersCondition(alias: string) {
   return `(${alias}.identifier = u.cpf OR ${alias}.identifier = u.email OR ${alias}.identifier = u.matricula OR ${alias}.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g'))`;
+}
+
+function getOptionalUserId(req: AuthRequest): number | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  try {
+    const decoded = jwt.verify(authHeader.slice(7), JWT_SECRET) as any;
+    return decoded?.id ? Number(decoded.id) : null;
+  } catch {
+    return null;
+  }
 }
 
 // GET /api/courses — Listar cursos do usuário (owner ou adicional)
@@ -470,11 +482,12 @@ router.get('/:id/enrollment-link', authMiddleware, async (req: AuthRequest, res:
 // POST /api/courses/:id/enroll — Inscrever aluno
 router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
   const { identifier } = req.body;
-  if (!identifier) {
+  const authenticatedUserId = getOptionalUserId(req);
+  if (!identifier && !authenticatedUserId) {
     res.status(400).json({ error: 'Identificador obrigatório' });
     return;
   }
-  const rawIdentifier = String(identifier).trim();
+  const rawIdentifier = String(identifier || '').trim();
   const clean = normalizeIdentifier(rawIdentifier);
   const matriculaCandidate = rawIdentifier.toUpperCase();
   try {
@@ -491,12 +504,24 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // 1. Busca aluno (normaliza também o valor do banco)
-    const { rows: users } = await pool.query(
-      `SELECT id, name, cpf, email, matricula, departamento, cargo FROM app_users
-       WHERE cpf = $1 OR email = $1 OR matricula = $1 OR matricula = $2`,
-      [clean, matriculaCandidate]
-    );
+    let users;
+    if (authenticatedUserId) {
+      const result = await pool.query(
+        `SELECT id, name, cpf, email, matricula, departamento, cargo
+         FROM app_users
+         WHERE id = $1`,
+        [authenticatedUserId]
+      );
+      users = result.rows;
+    } else {
+      const result = await pool.query(
+        `SELECT id, name, cpf, email, matricula, departamento, cargo FROM app_users
+         WHERE cpf = $1 OR email = $1 OR matricula = $1 OR matricula = $2`,
+        [clean, matriculaCandidate]
+      );
+      users = result.rows;
+    }
+
     if (users.length === 0) {
       res.status(404).json({ error: 'USER_NOT_FOUND' });
       return;
@@ -507,12 +532,22 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
     const storedIdentifier = user.cpf || user.email
       ? normalizeIdentifier(user.cpf || user.email)
       : user.matricula;
-    await pool.query(
-      `INSERT INTO registrations (course_id, identifier, full_name, role, department)
-       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (course_id, identifier) DO NOTHING`,
+    if (!storedIdentifier) {
+      res.status(400).json({ error: 'Cadastro do aluno sem CPF, e-mail ou matrícula' });
+      return;
+    }
+    const { rows: registrations } = await pool.query(
+      `INSERT INTO registrations (course_id, identifier, full_name, role, department, status)
+       VALUES ($1, $2, $3, $4, $5, 'approved')
+       ON CONFLICT (course_id, identifier) DO UPDATE SET
+         full_name = EXCLUDED.full_name,
+         role = EXCLUDED.role,
+         department = EXCLUDED.department,
+         status = 'approved'
+       RETURNING *`,
       [req.params.id, storedIdentifier, user.name, user.cargo, user.departamento]
     );
-    res.json({ message: 'Inscrito com sucesso' });
+    res.json({ message: 'Inscrito com sucesso', registration: registrations[0] });
   } catch (err) {
     console.error('Enroll error:', err);
     res.status(500).json({ error: 'Erro ao inscrever' });

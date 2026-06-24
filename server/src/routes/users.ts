@@ -23,6 +23,22 @@ function preferredIdentifier(user: any): string {
   return String(user.matricula || '').trim().toUpperCase();
 }
 
+function canMergeUsers(source: any, target: any): { ok: boolean; reason?: string } {
+  const sourceCpf = source.cpf ? normalizeIdentifier(source.cpf) : null;
+  const targetCpf = target.cpf ? normalizeIdentifier(target.cpf) : null;
+  if (sourceCpf && targetCpf && sourceCpf !== targetCpf) {
+    return { ok: false, reason: 'Matrícula já vinculada a usuário com CPF diferente. Revise os cadastros antes de mesclar.' };
+  }
+
+  const sourceEmail = source.email ? String(source.email).trim().toLowerCase() : null;
+  const targetEmail = target.email ? String(target.email).trim().toLowerCase() : null;
+  if (sourceEmail && targetEmail && sourceEmail !== targetEmail) {
+    return { ok: false, reason: 'Matrícula já vinculada a usuário com e-mail diferente. Revise os cadastros antes de mesclar.' };
+  }
+
+  return { ok: true };
+}
+
 async function mergeUserInto(client: any, source: any, target: any) {
   const sourceIds = identityValues(source);
   const targetIdentifier = preferredIdentifier(target);
@@ -76,6 +92,60 @@ async function mergeUserInto(client: any, source: any, target: any) {
          WHERE existing.class_id = a.class_id AND existing.identifier = $2
        )`,
     [sourceIds, targetIdentifier]
+  );
+
+  await client.query(
+    `UPDATE class_online_progress p
+     SET identifier = $1,
+         full_name = COALESCE($2, full_name)
+     WHERE identifier = ANY($3::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM class_online_progress existing
+         WHERE existing.class_id = p.class_id AND existing.identifier = $1
+       )`,
+    [targetIdentifier, target.name, sourceIds]
+  );
+
+  await client.query(
+    `UPDATE class_online_progress target
+     SET current_slide = GREATEST(target.current_slide, source.current_slide),
+         total_time_spent_seconds = GREATEST(target.total_time_spent_seconds, source.total_time_spent_seconds),
+         completed_at = COALESCE(target.completed_at, source.completed_at),
+         max_video_position_seconds = GREATEST(
+           COALESCE(target.max_video_position_seconds, 0),
+           COALESCE(source.max_video_position_seconds, 0)
+         ),
+         video_duration_seconds = COALESCE(target.video_duration_seconds, source.video_duration_seconds),
+         full_name = COALESCE($2, target.full_name)
+     FROM class_online_progress source
+     WHERE source.class_id = target.class_id
+       AND target.identifier = $1
+       AND source.identifier = ANY($3::text[])
+       AND source.identifier <> $1`,
+    [targetIdentifier, target.name, sourceIds]
+  );
+
+  await client.query(
+    `DELETE FROM class_online_progress p
+     WHERE identifier = ANY($1::text[])
+       AND identifier <> $2
+       AND EXISTS (
+         SELECT 1 FROM class_online_progress existing
+         WHERE existing.class_id = p.class_id AND existing.identifier = $2
+       )`,
+    [sourceIds, targetIdentifier]
+  );
+
+  await client.query(
+    `UPDATE evaluation_participants ep
+     SET identifier = $1,
+         name = COALESCE($2, name)
+     WHERE identifier = ANY($3::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM evaluation_participants existing
+         WHERE existing.evaluation_id = ep.evaluation_id AND existing.identifier = $1
+       )`,
+    [targetIdentifier, target.name, sourceIds]
   );
 
   await client.query('UPDATE courses SET owner_id = $1 WHERE owner_id = $2', [target.id, source.id]);
@@ -288,25 +358,16 @@ router.post('/:id/assign-matricula', authMiddleware, isAdminMiddleware, async (r
     }
 
     const { rows: targetRows } = await client.query(
-      'SELECT * FROM app_users WHERE matricula = $1 AND id <> $2 FOR UPDATE',
+      'SELECT * FROM app_users WHERE UPPER(matricula) = UPPER($1) AND id <> $2 FOR UPDATE',
       [matriculaClean, req.params.id]
     );
 
     if (targetRows.length > 0) {
       const target = targetRows[0];
-      if (source.cpf && target.cpf && normalizeIdentifier(source.cpf) !== normalizeIdentifier(target.cpf)) {
+      const mergeCheck = canMergeUsers(source, target);
+      if (!mergeCheck.ok) {
         await client.query('ROLLBACK');
-        res.status(409).json({ error: 'Matrícula já vinculada a usuário com CPF diferente. Revise os cadastros antes de mesclar.' });
-        return;
-      }
-      if (source.email && target.email && source.email.trim().toLowerCase() !== target.email.trim().toLowerCase()) {
-        await client.query('ROLLBACK');
-        res.status(409).json({ error: 'Matrícula já vinculada a usuário com e-mail diferente. Revise os cadastros antes de mesclar.' });
-        return;
-      }
-      if (!source.is_pre_registered && source.matricula) {
-        await client.query('ROLLBACK');
-        res.status(409).json({ error: 'Matrícula já cadastrada para outro usuário' });
+        res.status(409).json({ error: mergeCheck.reason });
         return;
       }
 

@@ -23,7 +23,7 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
   const { rows: studentRows } = await pool.query(
     `SELECT 1
      FROM registrations r
-     INNER JOIN app_users u ON (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
+     INNER JOIN app_users u ON ${studentIdentifiersCondition('r')}
      WHERE r.course_id = $1 AND u.id = $2
      LIMIT 1`,
     [courseId, userId]
@@ -32,7 +32,13 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
 }
 
 function studentIdentifiersCondition(alias: string) {
-  return `(${alias}.identifier = u.cpf OR ${alias}.identifier = u.email OR ${alias}.identifier = u.matricula OR ${alias}.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g'))`;
+  return `(
+    ${alias}.identifier = u.cpf
+    OR ${alias}.identifier = regexp_replace(COALESCE(u.cpf, ''), '\\D', '', 'g')
+    OR lower(${alias}.identifier) = lower(COALESCE(u.email, ''))
+    OR ${alias}.identifier = u.matricula
+    OR ${alias}.identifier = regexp_replace(COALESCE(u.matricula, ''), '\\D', '', 'g')
+  )`;
 }
 
 function getOptionalUserId(req: AuthRequest): number | null {
@@ -90,7 +96,7 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
              SELECT *
              FROM attendances a
              WHERE a.class_id = cl.id
-               AND (a.identifier = u.cpf OR a.identifier = u.email OR a.identifier = u.matricula)
+               AND ${studentIdentifiersCondition('a')}
              ORDER BY a.updated_at DESC NULLS LAST, a.created_at DESC
              LIMIT 1
            ) a ON cl.type <> 'online'
@@ -98,7 +104,7 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
              SELECT *
              FROM class_online_progress op
              WHERE op.class_id = cl.id
-               AND (op.identifier = u.cpf OR op.identifier = u.email OR op.identifier = u.matricula)
+               AND ${studentIdentifiersCondition('op')}
              ORDER BY op.completed_at DESC NULLS LAST, op.created_at DESC
              LIMIT 1
            ) op ON cl.type = 'online'

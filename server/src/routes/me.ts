@@ -8,9 +8,9 @@ const router = Router();
 // GET /api/me/performance — Desempenho do aluno em todos os cursos matriculados
 router.get('/performance', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    // Buscar CPF e email do banco (não estão no JWT)
+    // Buscar identificadores do banco (não estão todos no JWT)
     const { rows: userRows } = await pool.query(
-      'SELECT cpf, email FROM app_users WHERE id = $1',
+      'SELECT cpf, email, matricula FROM app_users WHERE id = $1',
       [req.user!.id]
     );
     if (userRows.length === 0) {
@@ -23,7 +23,9 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
     // 1. Identificadores normalizados do usuário logado
     const cpfId = user.cpf ? normalizeIdentifier(user.cpf) : null;
     const emailId = user.email ? normalizeIdentifier(user.email) : null;
-    const ids = [cpfId, emailId].filter((v): v is string => v !== null && v !== '');
+    const matriculaId = user.matricula ? user.matricula.trim().toUpperCase() : null;
+    const matriculaNumericId = user.matricula ? normalizeIdentifier(user.matricula) : null;
+    const ids = Array.from(new Set([cpfId, emailId, matriculaId, matriculaNumericId].filter((v): v is string => v !== null && v !== '')));
 
     if (ids.length === 0) {
       res.json({ courses: [] });

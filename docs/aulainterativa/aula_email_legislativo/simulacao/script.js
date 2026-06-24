@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const minSeconds = Math.max(0, Number(urlParams.get('min_seconds')) || 0);
     const reviewMode = urlParams.get('review') === '1';
+    const unlockedFromSystem = Math.max(0, Math.min(totalSlides, Number(urlParams.get('unlocked_slides')) || 0));
     let lockTimer = null;
     let remainingSeconds = 0;
 
@@ -32,6 +33,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Inicialização
     function init() {
+        for (let slideIndex = 0; slideIndex < unlockedFromSystem; slideIndex++) {
+            viewedSlides.add(slideIndex);
+            unlockedSlides.add(slideIndex);
+            endedSlides.add(slideIndex);
+        }
+
         updateUI();
         
         // Listeners
@@ -200,6 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
             total_steps: totalSteps,
             image: lessonData[currentStepIndex].image,
             min_seconds: minSeconds,
+            unlocked_slides: unlockedSlides.size,
             review_mode: reviewMode,
             timestamp: Date.now()
         });
@@ -232,6 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
             current_step: currentStepIndex + 1,
             total_steps: totalSteps,
             remaining_seconds: remainingSeconds,
+            unlocked_slides: unlockedSlides.size,
             unlocked: unlockedSlides.has(currentSlideIndex) || reviewMode,
             review_mode: reviewMode
         });

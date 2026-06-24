@@ -30,6 +30,7 @@ export function InteractiveLessonPage() {
   const [joinLoading, setJoinLoading] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [onlineEvalState, setOnlineEvalState] = useState<any>(null);
+  const [interactiveProgress, setInteractiveProgress] = useState<any>(null);
   const [selectedAlternativeId, setSelectedAlternativeId] = useState<number | null>(null);
   const [evalTimerLeft, setEvalTimerLeft] = useState<number | null>(null);
   const [evalSubmitting, setEvalSubmitting] = useState(false);
@@ -77,12 +78,14 @@ export function InteractiveLessonPage() {
         if (reviewMode || e.data.data?.review_mode) return;
 
         try {
-          await api.post(`/classes/${classId}/online/advance`, {
+          const res = await api.post(`/classes/${classId}/online/advance`, {
             identifier,
+            slide_index: e.data.data?.slide_index,
+            total_slides: e.data.data?.total_slides,
           });
+          if (res?.progress) setInteractiveProgress(res.progress);
         } catch (err: any) {
-          // The iframe enforces the same minimum time locally. If the backend
-          // rejects a duplicate/late event, keep the lesson usable and log it.
+          // If the backend rejects a premature event, keep the lesson usable and log it.
           console.warn('Interactive slide progress was not recorded', err);
         }
         return;
@@ -122,6 +125,7 @@ export function InteractiveLessonPage() {
       // Try to check state to see if it's already completed
       try {
         const stateRes = await api.get(`/classes/${classId}/interactive/state?identifier=${encodeURIComponent(identifier.trim())}`);
+        setInteractiveProgress(stateRes.progress || null);
         if (stateRes.progress?.completed_at) {
           setReviewMode(false);
           setStep('completed');
@@ -219,9 +223,11 @@ export function InteractiveLessonPage() {
     const rawUrl = String(config.html_url || '').replace(/^\/api/, apiBase);
     const separator = rawUrl.includes('?') ? '&' : '?';
     const minSeconds = Math.max(0, Number(config.slide_minimum_seconds ?? 0) || 0);
+    const unlockedSlides = Math.max(0, Number(interactiveProgress?.current_slide ?? 0) || 0);
     const params = new URLSearchParams({
       min_seconds: String(minSeconds),
       review: reviewMode ? '1' : '0',
+      unlocked_slides: String(unlockedSlides),
     });
     return `${rawUrl}${separator}${params.toString()}`;
   };

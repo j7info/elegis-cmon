@@ -299,7 +299,7 @@ router.post('/:id/online/video-progress', async (req: Request, res: Response) =>
 // POST /api/classes/:id/online/advance — Avançar para o próximo slide
 router.post('/:id/online/advance', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { identifier } = req.body;
+  const { identifier, slide_index } = req.body;
 
   if (!identifier?.trim()) {
     res.status(400).json({ error: 'Identificador é obrigatório' });
@@ -317,9 +317,21 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
     }
 
     const prog = progress[0];
+    const requestedSlide = Math.max(0, Math.floor(Number(slide_index) || 0));
+    const targetSlide = requestedSlide > 0 ? requestedSlide : prog.current_slide + 1;
 
     if (prog.completed_at) {
       res.status(400).json({ error: 'Esta aula já foi concluída' });
+      return;
+    }
+
+    if (targetSlide <= prog.current_slide) {
+      res.json({
+        progress: prog,
+        time_on_slide: 0,
+        total_time_spent_seconds: prog.total_time_spent_seconds,
+        already_recorded: true,
+      });
       return;
     }
 
@@ -342,10 +354,11 @@ router.post('/:id/online/advance', async (req: Request, res: Response) => {
       return;
     }
 
-    // Adiciona o tempo gasto neste slide
-    const timeOnSlide = Math.floor(elapsed);
+    // Adiciona no máximo o tempo mínimo exigido para evitar inflar presença
+    // quando o aluno volta dias depois a uma sessão já iniciada.
+    const timeOnSlide = Math.min(Math.floor(elapsed), minSecs);
     const newTotalTime = prog.total_time_spent_seconds + timeOnSlide;
-    const nextSlide = prog.current_slide + 1;
+    const nextSlide = Math.max(prog.current_slide + 1, targetSlide);
 
     // Atualiza progresso
     const { rows: updated } = await pool.query(

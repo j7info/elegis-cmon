@@ -5,8 +5,108 @@ import { authMiddleware, AuthRequest, isAdminMiddleware } from '../middleware/au
 import crypto from 'crypto';
 import { sendRecoveryEmail } from '../lib/mailer.js';
 import { getAppBaseUrl } from '../lib/security.js';
+import { normalizeIdentifier } from '../lib/identifier.js';
 
 const router = Router();
+
+function identityValues(user: any): string[] {
+  return Array.from(new Set(
+    [user.cpf, user.email, user.matricula, user.matricula ? normalizeIdentifier(user.matricula) : null]
+      .filter(Boolean)
+      .map((value: string) => String(value))
+  ));
+}
+
+function preferredIdentifier(user: any): string {
+  if (user.cpf) return normalizeIdentifier(user.cpf);
+  if (user.email) return String(user.email).trim().toLowerCase();
+  return String(user.matricula || '').trim().toUpperCase();
+}
+
+async function mergeUserInto(client: any, source: any, target: any) {
+  const sourceIds = identityValues(source);
+  const targetIdentifier = preferredIdentifier(target);
+
+  await client.query(
+    `UPDATE registrations r
+     SET identifier = $1,
+         full_name = COALESCE($2, full_name),
+         role = COALESCE($3, role),
+         department = COALESCE($4, department)
+     WHERE identifier = ANY($5::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM registrations existing
+         WHERE existing.course_id = r.course_id AND existing.identifier = $1
+       )`,
+    [targetIdentifier, target.name, target.cargo, target.departamento, sourceIds]
+  );
+
+  await client.query(
+    `DELETE FROM registrations r
+     WHERE identifier = ANY($1::text[])
+       AND identifier <> $2
+       AND EXISTS (
+         SELECT 1 FROM registrations existing
+         WHERE existing.course_id = r.course_id AND existing.identifier = $2
+       )`,
+    [sourceIds, targetIdentifier]
+  );
+
+  await client.query(
+    `UPDATE attendances a
+     SET identifier = $1,
+         full_name = COALESCE($2, full_name),
+         role = COALESCE($3, role),
+         department = COALESCE($4, department),
+         updated_at = NOW()
+     WHERE identifier = ANY($5::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM attendances existing
+         WHERE existing.class_id = a.class_id AND existing.identifier = $1
+       )`,
+    [targetIdentifier, target.name, target.cargo, target.departamento, sourceIds]
+  );
+
+  await client.query(
+    `DELETE FROM attendances a
+     WHERE identifier = ANY($1::text[])
+       AND identifier <> $2
+       AND EXISTS (
+         SELECT 1 FROM attendances existing
+         WHERE existing.class_id = a.class_id AND existing.identifier = $2
+       )`,
+    [sourceIds, targetIdentifier]
+  );
+
+  await client.query('UPDATE courses SET owner_id = $1 WHERE owner_id = $2', [target.id, source.id]);
+  await client.query('UPDATE classes SET owner_id = $1 WHERE owner_id = $2', [target.id, source.id]);
+  await client.query('UPDATE classes SET auxiliary_teacher_id = $1 WHERE auxiliary_teacher_id = $2', [target.id, source.id]);
+  await client.query(
+    `INSERT INTO course_teachers (course_id, teacher_id)
+     SELECT course_id, $1 FROM course_teachers WHERE teacher_id = $2
+     ON CONFLICT DO NOTHING`,
+    [target.id, source.id]
+  );
+  await client.query('DELETE FROM course_teachers WHERE teacher_id = $1', [source.id]);
+
+  await client.query(
+    `UPDATE app_users SET
+       name = COALESCE(name, $1),
+       email = COALESCE(email, $2),
+       cpf = COALESCE(cpf, $3),
+       cargo = COALESCE(cargo, $4),
+       funcao_confianca = COALESCE(funcao_confianca, $5),
+       departamento = COALESCE(departamento, $6),
+       orgao = COALESCE(orgao, $7),
+       status = 'Ativo',
+       is_pre_registered = FALSE,
+       updated_at = NOW()
+     WHERE id = $8`,
+    [source.name, source.email, source.cpf, source.cargo, source.funcao_confianca, source.departamento, source.orgao, target.id]
+  );
+
+  await client.query('DELETE FROM app_users WHERE id = $1', [source.id]);
+}
 
 // GET /api/users — Listar todos os usuários
 router.get('/', authMiddleware, isAdminMiddleware, async (_req: AuthRequest, res: Response) => {
@@ -164,10 +264,59 @@ router.post('/:id/assign-matricula', authMiddleware, isAdminMiddleware, async (r
     return;
   }
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const passwordHash = await bcrypt.hash(matriculaClean.toLowerCase(), 12);
 
-    const { rows } = await pool.query(
+    const { rows: sourceRows } = await client.query(
+      'SELECT * FROM app_users WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    );
+
+    if (sourceRows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Usuário não encontrado' });
+      return;
+    }
+
+    const source = sourceRows[0];
+    if (source.matricula && source.matricula !== matriculaClean && !source.is_pre_registered) {
+      await client.query('ROLLBACK');
+      res.status(409).json({ error: 'Usuário já possui matrícula definitiva' });
+      return;
+    }
+
+    const { rows: targetRows } = await client.query(
+      'SELECT * FROM app_users WHERE matricula = $1 AND id <> $2 FOR UPDATE',
+      [matriculaClean, req.params.id]
+    );
+
+    if (targetRows.length > 0) {
+      const target = targetRows[0];
+      if (source.cpf && target.cpf && normalizeIdentifier(source.cpf) !== normalizeIdentifier(target.cpf)) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: 'Matrícula já vinculada a usuário com CPF diferente. Revise os cadastros antes de mesclar.' });
+        return;
+      }
+      if (source.email && target.email && source.email.trim().toLowerCase() !== target.email.trim().toLowerCase()) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: 'Matrícula já vinculada a usuário com e-mail diferente. Revise os cadastros antes de mesclar.' });
+        return;
+      }
+      if (!source.is_pre_registered && source.matricula) {
+        await client.query('ROLLBACK');
+        res.status(409).json({ error: 'Matrícula já cadastrada para outro usuário' });
+        return;
+      }
+
+      await mergeUserInto(client, source, target);
+      await client.query('COMMIT');
+      res.json({ message: 'Usuário duplicado mesclado com a matrícula existente', user: { id: target.id, matricula: target.matricula, is_pre_registered: false } });
+      return;
+    }
+
+    const { rows } = await client.query(
       `UPDATE app_users SET 
         matricula = $1, 
         password_hash = $2, 
@@ -179,18 +328,23 @@ router.post('/:id/assign-matricula', authMiddleware, isAdminMiddleware, async (r
     );
 
     if (rows.length === 0) {
+      await client.query('ROLLBACK');
       res.status(404).json({ error: 'Usuário não encontrado ou já possui matrícula definitiva' });
       return;
     }
 
+    await client.query('COMMIT');
     res.json({ message: 'Matrícula atribuída com sucesso', user: rows[0] });
   } catch (err: any) {
+    await client.query('ROLLBACK');
     if (err.code === '23505') {
       res.status(409).json({ error: 'Matrícula já cadastrada para outro usuário' });
       return;
     }
     console.error('Assign matricula error:', err);
     res.status(500).json({ error: 'Erro ao atribuir matrícula' });
+  } finally {
+    client.release();
   }
 });
 

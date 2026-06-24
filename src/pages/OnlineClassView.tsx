@@ -78,7 +78,6 @@ export function OnlineClassView() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const youtubeRef = useRef<HTMLDivElement>(null);
-  const videoShellRef = useRef<HTMLDivElement>(null);
   const lastVideoSyncRef = useRef(0);
   const minRequired = classData?.slide_minimum_seconds ?? 30;
   const isVideoClass = classData?.online_content_type === 'video';
@@ -207,37 +206,23 @@ export function OnlineClassView() {
     if (step !== 'viewing' || !isVideoClass || !classData?.video_id || !youtubeRef.current) return;
 
     let cancelled = false;
-    let resizeObserver: ResizeObserver | null = null;
-
-    const resizePlayer = (player: any) => {
-      const rect = videoShellRef.current?.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect?.width || 0));
-      const height = Math.max(180, Math.floor(rect?.height || 0));
-      player?.setSize?.(width, height);
-    };
 
     const createPlayer = () => {
       if (cancelled || !youtubeRef.current || !(window as any).YT?.Player) return;
       const player = new (window as any).YT.Player(youtubeRef.current, {
-        width: '320',
-        height: '180',
+        width: '100%',
+        height: '100%',
         videoId: classData.video_id,
         playerVars: {
           controls: 0,
           disablekb: 1,
           enablejsapi: 1,
           modestbranding: 1,
-          origin: window.location.origin,
           rel: 0,
           playsinline: 1,
         },
         events: {
           onReady: (event: any) => {
-            resizePlayer(event.target);
-            if (videoShellRef.current) {
-              resizeObserver = new ResizeObserver(() => resizePlayer(event.target));
-              resizeObserver.observe(videoShellRef.current);
-            }
             const duration = Math.floor(event.target.getDuration() || classData.video_duration_seconds || 0);
             setVideoDuration(duration);
             setVideoReady(true);
@@ -273,7 +258,6 @@ export function OnlineClassView() {
 
     return () => {
       cancelled = true;
-      resizeObserver?.disconnect();
       setVideoReady(false);
       setVideoPlaying(false);
       setVideoPlayer((player: any) => {
@@ -855,7 +839,10 @@ export function OnlineClassView() {
         </header>
 
         <section className="flex-1 min-h-0 flex items-center justify-center p-0 bg-black overflow-hidden">
-          <div ref={videoShellRef} className="w-full h-full bg-black overflow-hidden relative [&_iframe]:absolute [&_iframe]:inset-0 [&_iframe]:h-full [&_iframe]:w-full">
+          <div
+            className="aspect-video bg-black overflow-hidden relative w-full max-w-full max-h-full [&_iframe]:absolute [&_iframe]:inset-0 [&_iframe]:h-full [&_iframe]:w-full"
+            style={{ width: 'min(100vw, calc((100vh - 188px) * 16 / 9))' }}
+          >
             {!videoReady && (
               <div className="absolute inset-0 flex items-center justify-center text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin" />

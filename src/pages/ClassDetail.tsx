@@ -653,7 +653,7 @@ export function ClassDetail() {
               Link Aula Online
             </button>
           )}
-          {classData.status === 'completed' && (
+          {classData.type !== 'online' && classData.status === 'completed' && (
             <button onClick={async () => {
               if (allUsers.length === 0) {
                 try {
@@ -993,17 +993,18 @@ export function ClassDetail() {
                           </span>
                         ) : isOnlineClass ? (
                           <span className="text-gray-300">Aguardando</span>
-                        ) : att?.justification != null ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                            <Award className="w-3 h-3" /> {att.justification}%
-                          </span>
-                        ) : classData.status !== 'completed' && p === 0 ? (
+                        ) : !isOnlineClass && (att?.justification != null || p < pTotal) ? (
                           <div className="relative">
+                            {att?.justification != null && (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full mr-2">
+                                <Award className="w-3 h-3" /> {att.justification}%
+                              </span>
+                            )}
                             <button
                               onClick={() => setJustifyingId(justifyingId === reg.identifier ? null : reg.identifier)}
                               className="text-xs text-teal-600 hover:text-teal-800 font-medium"
                             >
-                              Justificar
+                              {att?.justification != null ? 'Alterar' : 'Justificar'}
                             </button>
                             {justifyingId === reg.identifier && (
                               <div className="absolute right-0 top-6 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex gap-1">

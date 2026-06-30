@@ -748,32 +748,131 @@ router.put('/:id/attendances/justify', authMiddleware, isCourseCreatorMiddleware
       return;
     }
 
-    const { rows: [att] } = await pool.query(
-      `INSERT INTO attendances (class_id, identifier, justification)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (class_id, identifier) DO UPDATE SET justification = EXCLUDED.justification
-       RETURNING *`,
-      [req.params.id, identifier, justification]
+    const { rows: [classRow] } = await pool.query(
+      'SELECT id, course_id, type FROM classes WHERE id = $1',
+      [req.params.id]
     );
 
-    // Auto-register the student in the course if not already registered
-    const { rows: classRows } = await pool.query('SELECT course_id FROM classes WHERE id = $1', [req.params.id]);
-    if (classRows.length > 0) {
-      const courseId = classRows[0].course_id;
-      
-      const { rows: userRows } = await pool.query(
-        'SELECT name, cargo, departamento FROM app_users WHERE matricula = $1 OR cpf = $1 OR email = $1',
-        [identifier]
+    if (!classRow) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
+    if (classRow.type === 'online') {
+      res.status(400).json({ error: 'Justificativa manual de presença é exclusiva para aulas presenciais' });
+      return;
+    }
+
+    const rawIdentifier = String(identifier).trim();
+    const normalizedIdentifier = rawIdentifier.replace(/\D/g, '');
+    const lowerIdentifier = rawIdentifier.toLowerCase();
+
+    const { rows: userRows } = await pool.query(
+      `SELECT id, name, cpf, email, matricula, cargo, departamento
+       FROM app_users
+       WHERE cpf = $1
+          OR regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = $2
+          OR lower(email) = $3
+          OR matricula = $1
+          OR regexp_replace(COALESCE(matricula, ''), '\\D', '', 'g') = $2
+       ORDER BY
+         CASE WHEN cpf IS NOT NULL AND cpf <> '' THEN 0 ELSE 1 END,
+         id
+       LIMIT 1`,
+      [rawIdentifier, normalizedIdentifier, lowerIdentifier]
+    );
+    const user = userRows[0];
+
+    const baseAliases = [
+      rawIdentifier,
+      normalizedIdentifier,
+      lowerIdentifier,
+      user?.cpf,
+      user?.cpf ? String(user.cpf).replace(/\D/g, '') : null,
+      user?.email ? String(user.email).toLowerCase() : null,
+      user?.matricula,
+      user?.matricula ? String(user.matricula).replace(/\D/g, '') : null,
+    ].filter((value, index, arr): value is string => Boolean(value) && arr.indexOf(value) === index);
+
+    const { rows: registrationRows } = await pool.query(
+      `SELECT identifier, full_name, role, department
+       FROM registrations
+       WHERE course_id = $1
+         AND status = 'approved'
+         AND (
+           identifier = ANY($2::text[])
+           OR regexp_replace(identifier, '\\D', '', 'g') = ANY($2::text[])
+           OR lower(identifier) = ANY($2::text[])
+           OR ($3::text IS NOT NULL AND lower(trim(full_name)) = lower(trim($3::text)))
+         )
+       ORDER BY created_at, id`,
+      [classRow.course_id, baseAliases, user?.name || null]
+    );
+
+    const aliases = [
+      ...baseAliases,
+      ...registrationRows.map((row: any) => row.identifier),
+      ...registrationRows.map((row: any) => String(row.identifier || '').replace(/\D/g, '')),
+      ...registrationRows.map((row: any) => String(row.identifier || '').toLowerCase()),
+    ].filter((value, index, arr): value is string => Boolean(value) && arr.indexOf(value) === index);
+
+    const preferredRegistration = registrationRows[0];
+    const canonicalIdentifier = user?.cpf
+      ? String(user.cpf).replace(/\D/g, '')
+      : user?.email
+        ? String(user.email).toLowerCase()
+        : user?.matricula
+          ? String(user.matricula)
+          : preferredRegistration?.identifier || rawIdentifier;
+    const fullName = user?.name || preferredRegistration?.full_name || null;
+    const role = user?.cargo || preferredRegistration?.role || null;
+    const department = user?.departamento || preferredRegistration?.department || null;
+
+    const { rows: updatedAttendances } = await pool.query(
+      `UPDATE attendances
+       SET justification = $3,
+           full_name = COALESCE(full_name, $4),
+           role = COALESCE(role, $5),
+           department = COALESCE(department, $6),
+           updated_at = NOW()
+       WHERE class_id = $1
+         AND (
+           identifier = ANY($2::text[])
+           OR regexp_replace(identifier, '\\D', '', 'g') = ANY($2::text[])
+           OR lower(identifier) = ANY($2::text[])
+         )
+       RETURNING *`,
+      [req.params.id, aliases, justification, fullName, role, department]
+    );
+
+    let att = updatedAttendances[0];
+    if (!att) {
+      const { rows: insertedAttendances } = await pool.query(
+        `INSERT INTO attendances (class_id, identifier, full_name, role, department, justification)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (class_id, identifier) DO UPDATE
+           SET justification = EXCLUDED.justification,
+               full_name = COALESCE(attendances.full_name, EXCLUDED.full_name),
+               role = COALESCE(attendances.role, EXCLUDED.role),
+               department = COALESCE(attendances.department, EXCLUDED.department),
+               updated_at = NOW()
+         RETURNING *`,
+        [req.params.id, canonicalIdentifier, fullName, role, department, justification]
       );
-      
-      if (userRows.length > 0) {
-        const user = userRows[0];
+      att = insertedAttendances[0];
+    }
+
+    const hasRegistration = registrationRows.some((row: any) => aliases.includes(row.identifier));
+    if (!hasRegistration && fullName) {
+      try {
         await pool.query(
           `INSERT INTO registrations (course_id, identifier, full_name, role, department)
            VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (course_id, identifier) DO NOTHING`,
-          [courseId, identifier, user.name, user.cargo, user.departamento]
+          [classRow.course_id, canonicalIdentifier, fullName, role, department]
         );
+      } catch (registrationErr) {
+        console.error('Auto-register justified student error:', registrationErr);
       }
     }
 

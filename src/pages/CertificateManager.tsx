@@ -201,8 +201,20 @@ export function CertificateManager() {
               <span className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-green-600" /> Alunos Aprovados
               </span>
-              <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                {approvedStudents.length} / {studentsReport.length}
+              <span className="flex items-center gap-2">
+                {approvedStudents.length > 0 && (
+                  <Link
+                    to={`/certificates/${courseId}/print-all`}
+                    target="_blank"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-lg border border-teal-200 transition-colors"
+                    title="Imprimir todos os certificados"
+                  >
+                    <Printer className="w-4 h-4" /> Imprimir todos
+                  </Link>
+                )}
+                <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                  {approvedStudents.length} / {studentsReport.length}
+                </span>
               </span>
             </h2>
 

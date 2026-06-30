@@ -48,6 +48,7 @@ function Main() {
         <Route path="/s/:classId/:step" element={<ScanPage />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/certificate/:courseId/:studentId" element={<PrintCertificate />} />
+        <Route path="/certificates/:courseId/print-all" element={<ProtectedRoute><PrintCertificate /></ProtectedRoute>} />
         <Route path="/verify" element={<VerifyCertificate />} />
         <Route path="/verify/:tokenParam" element={<VerifyCertificate />} />
         <Route path="/evaluation/:evaluationId/session" element={<ProtectedRoute><EvaluationSession /></ProtectedRoute>} />

@@ -308,19 +308,11 @@ router.get('/:id/subcourse-candidates', authMiddleware, isCourseCreatorMiddlewar
     const { rows } = await pool.query(
       `WITH target AS (
          SELECT id FROM courses WHERE id = $1 AND is_subcourse = FALSE
-       ),
-       accessible AS (
-         SELECT c.id
-         FROM courses c
-         LEFT JOIN course_teachers ct ON c.id = ct.course_id
-         WHERE $2 = TRUE OR c.owner_id = $3 OR ct.teacher_id = $3
-         GROUP BY c.id
        )
        SELECT c.*,
          COALESCE(class_stats.class_count, 0)::int AS class_count,
          parent.title AS current_parent_title
        FROM courses c
-       JOIN accessible a ON a.id = c.id
        CROSS JOIN target
        LEFT JOIN courses parent ON parent.id = c.parent_course_id
        LEFT JOIN LATERAL (
@@ -331,7 +323,7 @@ router.get('/:id/subcourse-candidates', authMiddleware, isCourseCreatorMiddlewar
        WHERE c.id <> target.id
          AND NOT (c.parent_course_id = target.id AND c.is_subcourse = TRUE)
        ORDER BY c.is_subcourse, c.created_at DESC`,
-      [req.params.id, isAdmin(req.user), req.user!.id]
+      [req.params.id]
     );
     res.json(rows);
   } catch (err) {
@@ -353,10 +345,9 @@ router.post('/:id/attach-subcourse', authMiddleware, isCourseCreatorMiddleware, 
     await client.query('BEGIN');
 
     const parentAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
-    const childAccess = await userCanAccessCourse(String(subcourse_id), req.user!.id, req.user!.system_role);
-    if (!parentAccess || !childAccess) {
+    if (!parentAccess) {
       await client.query('ROLLBACK');
-      res.status(404).json({ error: 'Curso não encontrado' });
+      res.status(404).json({ error: 'Curso principal não encontrado' });
       return;
     }
 

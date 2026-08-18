@@ -359,7 +359,7 @@ export function CourseDetail() {
                 onClick={openSubcourseModal}
                 className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium transition-colors border border-indigo-100 flex items-center gap-2 whitespace-nowrap text-sm"
               >
-                <BookOpen className="w-4 h-4" /> Novo Subcurso
+                <BookOpen className="w-4 h-4" /> Subcursos / Migrar Cursos
               </button>
             )}
             <button
@@ -946,7 +946,7 @@ export function CourseDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowSubcourseModal(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-900">Subcursos de {courseData.title}</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Subcursos / Migrar Cursos</h2>
               <button type="button" onClick={() => setShowSubcourseModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded"><X className="w-5 h-5" /></button>
             </div>
             <div className="max-h-[80vh] overflow-y-auto px-6 py-5 space-y-6">
@@ -1000,7 +1000,7 @@ export function CourseDetail() {
                 <div>
                   <h3 className="font-semibold text-gray-900">Vincular curso existente</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Use para reorganizar cursos já realizados. Aulas, presenças e certificados emitidos permanecem no curso original.
+                    Use para colocar cursos já existentes dentro de <strong>{courseData.title}</strong>. Aulas, presenças e certificados emitidos permanecem preservados.
                   </p>
                 </div>
                 {loadingCandidates ? (

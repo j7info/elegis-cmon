@@ -615,11 +615,13 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
              CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_middle,
              CASE WHEN p.completed_at IS NOT NULL THEN (EXTRACT(EPOCH FROM p.completed_at)::bigint * 1000) ELSE NULL END AS scan_end,
              CASE
+               WHEN p.manual_percentage IS NOT NULL THEN p.manual_percentage
                WHEN p.completed_at IS NOT NULL THEN 100
                WHEN $3::numeric > 0 THEN LEAST(100, ROUND(((COALESCE(p.total_time_spent_seconds, 0)::numeric / 60) / $3::numeric) * 100))::int
                ELSE 0
              END AS justification,
              CASE
+               WHEN p.manual_percentage IS NOT NULL THEN p.manual_percentage
                WHEN p.completed_at IS NOT NULL THEN 100
                WHEN $3::numeric > 0 THEN LEAST(100, ROUND(((COALESCE(p.total_time_spent_seconds, 0)::numeric / 60) / $3::numeric) * 100))::int
                ELSE 0
@@ -628,7 +630,10 @@ router.get('/:id/attendances', authMiddleware, async (req: AuthRequest, res: Res
              p.completed_at,
              p.total_time_spent_seconds,
              p.current_slide,
-             'online' AS source
+             p.manual_percentage,
+             p.manual_recorded_at,
+             p.manual_recorded_by,
+             CASE WHEN p.manual_recorded_at IS NOT NULL THEN 'manual' ELSE 'online' END AS source
            FROM class_online_progress p
            LEFT JOIN app_users u
              ON p.identifier = u.cpf OR p.identifier = u.email
@@ -917,6 +922,172 @@ router.put('/:id/attendances/justify', authMiddleware, isCourseCreatorMiddleware
   } catch (err) {
     console.error('Justify attendance error:', err);
     res.status(500).json({ error: 'Erro ao justificar ausência' });
+  }
+});
+
+// PUT /api/classes/:id/attendances/manual — Registrar presença manual em lote
+// Funciona para aulas presenciais e também para aulas online/interativas.
+router.put('/:id/attendances/manual', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  const identifiers: string[] = Array.from(new Set<string>(
+    (Array.isArray(req.body.identifiers) ? req.body.identifiers : [req.body.identifier])
+      .map((value: unknown) => String(value || '').trim())
+      .filter(Boolean)
+  ));
+  const percentage = Number(req.body.percentage ?? 100);
+
+  if (identifiers.length === 0 || identifiers.length > 250) {
+    res.status(400).json({ error: 'Selecione entre 1 e 250 participantes' });
+    return;
+  }
+  if (!Number.isFinite(percentage) || percentage < 1 || percentage > 100) {
+    res.status(400).json({ error: 'O percentual deve estar entre 1 e 100' });
+    return;
+  }
+
+  try {
+    const canAccess = await userCanAccessClass(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Aula não encontrada' });
+      return;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: [classRow] } = await client.query(
+        'SELECT id, course_id, type, status, expected_duration_minutes FROM classes WHERE id = $1',
+        [req.params.id]
+      );
+      if (!classRow) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Aula não encontrada' });
+        return;
+      }
+      if (!['active', 'completed'].includes(classRow.status)) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: 'A presença manual só pode ser registrada em aulas ativas ou concluídas' });
+        return;
+      }
+
+      const saved: any[] = [];
+      for (const rawIdentifier of identifiers) {
+        const normalizedIdentifier = rawIdentifier.replace(/\D/g, '');
+        const lowerIdentifier = rawIdentifier.toLowerCase();
+
+        const { rows: userRows } = await client.query(
+          `SELECT id, name, cpf, email, matricula, cargo, departamento
+           FROM app_users
+           WHERE cpf = $1
+              OR ($2 <> '' AND regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = $2)
+              OR lower(email) = $3
+              OR matricula = $1
+              OR ($2 <> '' AND regexp_replace(COALESCE(matricula, ''), '\\D', '', 'g') = $2)
+           ORDER BY CASE WHEN cpf IS NOT NULL AND cpf <> '' THEN 0 ELSE 1 END, id
+           LIMIT 1`,
+          [rawIdentifier, normalizedIdentifier, lowerIdentifier]
+        );
+        const user = userRows[0];
+
+        const lookupAliases = [rawIdentifier, normalizedIdentifier, lowerIdentifier, user?.cpf, user?.email, user?.matricula]
+          .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+        const { rows: registrationRows } = await client.query(
+          `SELECT identifier, full_name, role, department
+           FROM registrations
+           WHERE course_id = $1
+             AND (
+               identifier = ANY($2::text[])
+               OR regexp_replace(identifier, '\\D', '', 'g') = ANY($2::text[])
+               OR lower(identifier) = ANY($2::text[])
+             )
+           ORDER BY created_at, id
+           LIMIT 1`,
+          [classRow.course_id, lookupAliases]
+        );
+        const registration = registrationRows[0];
+
+        if (!user && !registration) {
+          throw new Error(`Participante não encontrado: ${rawIdentifier}`);
+        }
+
+        const canonicalIdentifier = user?.cpf
+          ? String(user.cpf).replace(/\D/g, '')
+          : user?.email
+            ? String(user.email).toLowerCase()
+            : user?.matricula
+              ? String(user.matricula)
+              : String(registration.identifier);
+        const fullName = user?.name || registration?.full_name || canonicalIdentifier;
+        const role = user?.cargo || registration?.role || null;
+        const department = user?.departamento || registration?.department || null;
+
+        await client.query(
+          `INSERT INTO registrations (class_id, course_id, identifier, full_name, role, department, status)
+           VALUES ($1, $2, $3, $4, $5, $6, 'approved')
+           ON CONFLICT (course_id, identifier) DO UPDATE SET
+             full_name = EXCLUDED.full_name,
+             role = COALESCE(EXCLUDED.role, registrations.role),
+             department = COALESCE(EXCLUDED.department, registrations.department),
+             status = 'approved'`,
+          [classRow.id, classRow.course_id, canonicalIdentifier, fullName, role, department]
+        );
+
+        if (classRow.type === 'online') {
+          const expectedSeconds = Math.max(60, Number(classRow.expected_duration_minutes || 30) * 60);
+          const creditedSeconds = Math.round(expectedSeconds * percentage / 100);
+          const { rows: progressRows } = await client.query(
+            `INSERT INTO class_online_progress
+               (class_id, identifier, full_name, current_slide, total_time_spent_seconds, completed_at,
+                manual_percentage, manual_recorded_at, manual_recorded_by)
+             VALUES ($1, $2, $3, 0, $4, CASE WHEN $5 >= 100 THEN NOW() ELSE NULL END, $5, NOW(), $6)
+             ON CONFLICT (class_id, identifier) DO UPDATE SET
+               full_name = EXCLUDED.full_name,
+               total_time_spent_seconds = GREATEST(class_online_progress.total_time_spent_seconds, EXCLUDED.total_time_spent_seconds),
+               manual_percentage = EXCLUDED.manual_percentage,
+               manual_recorded_at = NOW(),
+               manual_recorded_by = EXCLUDED.manual_recorded_by,
+               completed_at = CASE
+                 WHEN $5 >= 100 THEN COALESCE(class_online_progress.completed_at, NOW())
+                 ELSE class_online_progress.completed_at
+               END
+             RETURNING *`,
+            [classRow.id, canonicalIdentifier, fullName, creditedSeconds, percentage, req.user!.id]
+          );
+          saved.push(progressRows[0]);
+        } else {
+          const { rows: attendanceRows } = await client.query(
+            `INSERT INTO attendances
+               (class_id, identifier, full_name, role, department, justification,
+                manual_percentage, manual_recorded_at, manual_recorded_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $6, NOW(), $7)
+             ON CONFLICT (class_id, identifier) DO UPDATE SET
+               full_name = EXCLUDED.full_name,
+               role = COALESCE(EXCLUDED.role, attendances.role),
+               department = COALESCE(EXCLUDED.department, attendances.department),
+               justification = EXCLUDED.justification,
+               manual_percentage = EXCLUDED.manual_percentage,
+               manual_recorded_at = NOW(),
+               manual_recorded_by = EXCLUDED.manual_recorded_by,
+               updated_at = NOW()
+             RETURNING *`,
+            [classRow.id, canonicalIdentifier, fullName, role, department, percentage, req.user!.id]
+          );
+          saved.push(attendanceRows[0]);
+        }
+      }
+
+      await client.query('COMMIT');
+      res.json({ count: saved.length, percentage, attendances: saved });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error('Manual attendance error:', err);
+    const status = String(err?.message || '').startsWith('Participante não encontrado:') ? 400 : 500;
+    res.status(status).json({ error: err?.message || 'Erro ao registrar presença manual' });
   }
 });
 

@@ -4,9 +4,10 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video, UserCheck, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
+import { InteractivePresentationViewer } from '../components/InteractivePresentationViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { AttemptDetailsModal } from '../components/AttemptDetailsModal';
 import { maskIdentifier } from '../lib/format';
@@ -21,6 +22,7 @@ export function ClassDetail() {
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [evalScores, setEvalScores] = useState<any[]>([]);
   const [presentationFile, setPresentationFile] = useState<File | null>(null);
+  const [showInteractivePresentation, setShowInteractivePresentation] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   
   const [isEditingClass, setIsEditingClass] = useState(false);
@@ -30,9 +32,11 @@ export function ClassDetail() {
   const [editTime, setEditTime] = useState('');
   const [allUsers, setAllUsers] = useState<any[]>([]);
   // Modal state for manual justification
-  const [showJustifyModal, setShowJustifyModal] = useState(false);
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
-  const [justificationPercent, setJustificationPercent] = useState<string>('0');
+  const [showManualAttendanceModal, setShowManualAttendanceModal] = useState(false);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [manualAttendancePercentage, setManualAttendancePercentage] = useState('100');
+  const [manualAttendanceSearch, setManualAttendanceSearch] = useState('');
+  const [savingManualAttendance, setSavingManualAttendance] = useState(false);
   // Modal state for manual student registration
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [newStudentId, setNewStudentId] = useState<string>('');
@@ -109,13 +113,15 @@ export function ClassDetail() {
   }, [classId, editingDuration, editingPoints]);
 
   useEffect(() => {
-    if (!loadError) {
-      loadData();
-      // Poll every 5 seconds when class is active
-      pollRef.current = setInterval(loadData, 5000);
-      return () => clearInterval(pollRef.current);
-    }
-  }, [loadData, loadError]);
+    if (loadError) return;
+
+    loadData();
+    if (classData?.status !== 'active') return;
+
+    // Atualização ao vivo somente durante a aula, sem pressionar o limite da API.
+    pollRef.current = setInterval(loadData, 10000);
+    return () => clearInterval(pollRef.current);
+  }, [loadData, loadError, classData?.status]);
 
   const loadEvaluations = useCallback(async () => {
     if (!classId) return;
@@ -128,8 +134,8 @@ export function ClassDetail() {
   }, [classId]);
 
   useEffect(() => {
-    if (classData) loadEvaluations();
-  }, [classData, loadEvaluations]);
+    if (classData?.id) loadEvaluations();
+  }, [classData?.id, loadEvaluations]);
 
   if (loadError) {
     return (
@@ -194,7 +200,7 @@ export function ClassDetail() {
   const updateClass = async (updates: any) => {
     try {
       const updated = await api.put(`/classes/${classId}`, updates);
-      setClassData(updated);
+      setClassData((current: any) => ({ ...current, ...updated }));
     } catch (err) {
       console.error('Update class error:', err);
     }
@@ -303,8 +309,14 @@ export function ClassDetail() {
     setEditingPoints(false);
   };
 
-  // Abre a apresentação: usa o PDF salvo na aula, ou pede um arquivo na hora.
+  // Abre a aula interativa no visualizador presencial próprio. Para as demais
+  // aulas, usa o PDF salvo ou pede um arquivo na hora.
   const handlePresent = async () => {
+    if (classData.is_interactive) {
+      setShowInteractivePresentation(true);
+      return;
+    }
+
     if (classData.presentation_url) {
       try {
         // Resolve a URL salva ('/api/uploads/...') contra a base da API,
@@ -566,9 +578,61 @@ export function ClassDetail() {
     }
   };
 
+  const handleManualAttendance = async () => {
+    if (!classId || selectedStudentIds.length === 0) return;
+    const percentage = parseInt(manualAttendancePercentage, 10);
+    if (isNaN(percentage) || percentage < 1 || percentage > 100) {
+      alert('Informe um percentual válido entre 1 e 100.');
+      return;
+    }
+
+    try {
+      setSavingManualAttendance(true);
+      await api.put(`/classes/${classId}/attendances/manual`, {
+        identifiers: selectedStudentIds,
+        percentage,
+      });
+      setShowManualAttendanceModal(false);
+      setSelectedStudentIds([]);
+      setManualAttendancePercentage('100');
+      setManualAttendanceSearch('');
+      await loadData();
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao registrar presença manual.');
+    } finally {
+      setSavingManualAttendance(false);
+    }
+  };
+
   const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
   const onlineClassUrl = `${appUrl}/#/${classData?.is_interactive ? 'interactive-lesson' : 'online-class'}/${classId}`;
   const linkToShare = onlineClassUrl;
+
+  const manualAttendanceOptionsMap = new Map<string, { identifier: string; name: string }>();
+  registrations.forEach(registration => {
+    if (!registration?.identifier) return;
+    manualAttendanceOptionsMap.set(String(registration.identifier), {
+      identifier: String(registration.identifier),
+      name: registration.full_name || registration.identifier,
+    });
+  });
+  const registeredNames = new Set(
+    registrations.map(registration => String(registration.full_name || '').trim().toLocaleLowerCase('pt-BR')).filter(Boolean)
+  );
+  allUsers
+    .filter(person => person.system_role === 'ALUNO')
+    .forEach(person => {
+      const identifier = String(person.cpf || person.email || person.matricula || '');
+      const normalizedName = String(person.name || '').trim().toLocaleLowerCase('pt-BR');
+      if (!identifier || manualAttendanceOptionsMap.has(identifier) || registeredNames.has(normalizedName)) return;
+      manualAttendanceOptionsMap.set(identifier, { identifier, name: person.name || identifier });
+    });
+  const manualAttendanceOptions = Array.from(manualAttendanceOptionsMap.values())
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const normalizedManualSearch = manualAttendanceSearch.trim().toLocaleLowerCase('pt-BR');
+  const filteredManualAttendanceOptions = normalizedManualSearch
+    ? manualAttendanceOptions.filter(option => `${option.name} ${option.identifier}`.toLocaleLowerCase('pt-BR').includes(normalizedManualSearch))
+    : manualAttendanceOptions;
 
   const copyLink = () => {
     navigator.clipboard.writeText(linkToShare);
@@ -653,19 +717,19 @@ export function ClassDetail() {
               Link Aula Online
             </button>
           )}
-          {classData.type !== 'online' && classData.status === 'completed' && (
+          {(classData.status === 'active' || classData.status === 'completed') && (
             <button onClick={async () => {
               if (allUsers.length === 0) {
                 try {
                   const usersData = await api.get('/users');
                   setAllUsers(usersData);
                 } catch (err) {
-                  console.error('Failed to load users for justification', err);
+                  console.error('Failed to load users for manual attendance', err);
                 }
               }
-              setShowJustifyModal(true);
+              setShowManualAttendanceModal(true);
             }} className="px-4 py-2 bg-teal-100 hover:bg-teal-200 text-teal-800 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Justificar Presença
+              <UserCheck className="w-4 h-4" /> Registrar presença manual
             </button>
           )}
           
@@ -676,9 +740,11 @@ export function ClassDetail() {
           )}
           {classData.status === 'active' && (
             <>
-              <input type="file" accept="application/pdf" ref={fileInputRef} className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) setPresentationFile(file); }} />
+              {!classData.is_interactive && (
+                <input type="file" accept="application/pdf" ref={fileInputRef} className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) setPresentationFile(file); }} />
+              )}
               <button onClick={handlePresent} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-                <Presentation className="w-4 h-4" /> {classData.presentation_url ? 'Apresentar' : 'Apresentar PDF'}
+                <Presentation className="w-4 h-4" /> {classData.is_interactive ? 'Apresentar presencialmente' : (classData.presentation_url ? 'Apresentar' : 'Apresentar PDF')}
               </button>
               <button onClick={() => updateClass({ status: 'completed' })} className="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4" /> Concluir Aula
@@ -710,71 +776,91 @@ export function ClassDetail() {
         </div>
       </div>
 
-        {/* Justification Modal */}
-        {showJustifyModal && (
+        {/* Manual attendance modal */}
+        {showManualAttendanceModal && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-6 m-4">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Justificar Presença</h3>
-                <button onClick={() => setShowJustifyModal(false)} className="p-1 hover:bg-gray-100 rounded-full">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Registrar presença manual</h3>
+                  <p className="text-xs text-gray-500 mt-1">Disponível para aulas ativas ou concluídas.</p>
+                </div>
+                <button onClick={() => setShowManualAttendanceModal(false)} className="p-1 hover:bg-gray-100 rounded-full">
                   <X className="w-5 h-5 text-gray-600" />
                 </button>
               </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Aluno</label>
-                <select
-                  value={selectedStudentId}
-                  onChange={e => setSelectedStudentId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                >
-                  <option value="">Selecione um aluno</option>
-                  {allUsers
-                    .filter(u => u.system_role === 'ALUNO')
-                    .map(user => (
-                      <option key={user.matricula} value={user.matricula}>
-                        {user.name} ({maskIdentifier(user.matricula)})
-                      </option>
-                    ))}
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Participantes</label>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <input
+                    type="search"
+                    value={manualAttendanceSearch}
+                    onChange={event => setManualAttendanceSearch(event.target.value)}
+                    className="w-full border border-gray-300 rounded-md py-2 pl-9 pr-3 text-sm"
+                    placeholder="Buscar por nome, CPF, e-mail ou matrícula"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs mb-2">
+                  <span className="text-gray-500">{selectedStudentIds.length} selecionado(s)</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentIds(current => Array.from(new Set([
+                      ...current,
+                      ...filteredManualAttendanceOptions.map(option => option.identifier),
+                    ])))}
+                    className="font-medium text-teal-700 hover:text-teal-800"
+                  >
+                    Selecionar todos os exibidos
+                  </button>
+                </div>
+                <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                  {filteredManualAttendanceOptions.length === 0 ? (
+                    <p className="p-4 text-sm text-center text-gray-400">Nenhum participante encontrado.</p>
+                  ) : filteredManualAttendanceOptions.map(option => (
+                    <label key={option.identifier} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedStudentIds.includes(option.identifier)}
+                        onChange={event => setSelectedStudentIds(current => event.target.checked
+                          ? Array.from(new Set([...current, option.identifier]))
+                          : current.filter(identifier => identifier !== option.identifier))}
+                        className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium text-gray-800 truncate">{option.name}</span>
+                        <span className="block text-xs text-gray-400">{maskIdentifier(option.identifier)}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">% de Presença</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Percentual de presença</label>
                 <input
                   type="number"
-                  min="0"
+                  min="1"
                   max="100"
-                  value={justificationPercent}
-                  onChange={e => setJustificationPercent(e.target.value)}
+                  value={manualAttendancePercentage}
+                  onChange={event => setManualAttendancePercentage(event.target.value)}
                   className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                  placeholder="0-100"
+                  placeholder="1-100"
                 />
               </div>
               <div className="flex justify-end space-x-2">
                 <button
-                  onClick={() => setShowJustifyModal(false)}
+                  onClick={() => setShowManualAttendanceModal(false)}
+                  disabled={savingManualAttendance}
                   className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md text-sm"
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={async () => {
-                    if (!selectedStudentId) {
-                      alert('Selecione um aluno.');
-                      return;
-                    }
-                    const perc = parseInt(justificationPercent, 10);
-                    if (isNaN(perc) || perc < 0 || perc > 100) {
-                      alert('Informe um percentual válido (0-100).');
-                      return;
-                    }
-                    await handleJustifyAttendance(selectedStudentId, perc);
-                    setShowJustifyModal(false);
-                    setSelectedStudentId('');
-                    setJustificationPercent('0');
-                  }}
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm"
+                  onClick={handleManualAttendance}
+                  disabled={selectedStudentIds.length === 0 || savingManualAttendance}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-md text-sm font-medium"
                 >
-                  Salvar
+                  {savingManualAttendance ? 'Registrando...' : `Registrar ${selectedStudentIds.length || ''}`.trim()}
                 </button>
               </div>
             </div>
@@ -937,7 +1023,14 @@ export function ClassDetail() {
                       </td>
                       <td className="px-4 py-3 text-center text-xs">
                         {isOnlineClass
-                          ? att
+                          ? att?.source === 'manual'
+                            ? (
+                              <div className="flex flex-col items-center leading-tight">
+                                <span className="font-semibold text-teal-700">{att.percentage}%</span>
+                                <span className="text-[11px] text-gray-400">manual</span>
+                              </div>
+                            )
+                            : att
                             ? (
                               <div className="flex flex-col items-center leading-tight">
                                 <span className="font-semibold text-gray-700">{Number(att.current_slide || 0)} slides</span>
@@ -948,7 +1041,9 @@ export function ClassDetail() {
                           : (att?.scan_middle ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)}
                       </td>
                       <td className="px-4 py-3 text-center text-xs">
-                        {isOnlineClass && att
+                        {isOnlineClass && att?.source === 'manual'
+                          ? <span className="text-gray-300">—</span>
+                          : isOnlineClass && att
                           ? <span className="font-medium text-gray-500">{formatDuration(att.total_time_spent_seconds)}</span>
                           : att?.scan_end ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>}
                       </td>
@@ -983,7 +1078,11 @@ export function ClassDetail() {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {isOnlineClass && att?.completed_at ? (
+                        {isOnlineClass && att?.source === 'manual' ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
+                            <UserCheck className="w-3 h-3" /> Presença manual
+                          </span>
+                        ) : isOnlineClass && att?.completed_at ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
                             <BookOpen className="w-3 h-3" /> {classData.online_content_type === 'video' ? 'Vídeo concluído' : 'Slides concluídos'}
                           </span>
@@ -997,7 +1096,8 @@ export function ClassDetail() {
                           <div className="relative">
                             {att?.justification != null && (
                               <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full mr-2">
-                                <Award className="w-3 h-3" /> {att.justification}%
+                                {att.manual_recorded_at ? <UserCheck className="w-3 h-3" /> : <Award className="w-3 h-3" />}
+                                {att.manual_recorded_at ? 'Manual' : 'Justificada'} · {att.justification}%
                               </span>
                             )}
                             <button
@@ -1267,6 +1367,19 @@ export function ClassDetail() {
           <PresentationViewer 
             file={presentationFile} 
             onClose={() => setPresentationFile(null)} 
+            classId={classId!}
+            appUrl={appUrl}
+            attendances={attendances}
+            onActivateQR={activateQRStep}
+            classData={classData}
+          />
+        </ErrorBoundary>
+      )}
+
+      {showInteractivePresentation && (
+        <ErrorBoundary>
+          <InteractivePresentationViewer
+            onClose={() => setShowInteractivePresentation(false)}
             classId={classId!}
             appUrl={appUrl}
             attendances={attendances}

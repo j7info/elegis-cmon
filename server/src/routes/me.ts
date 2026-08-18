@@ -52,7 +52,12 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
     // 3. Aulas com presença presencial ou progresso online do próprio aluno
     const { rows: classesRaw } = await pool.query(
       `SELECT
-         cl.id, cl.course_id, cl.title, cl.date, cl.type, cl.expected_duration_minutes,
+         cl.id,
+         CASE
+           WHEN course_meta.is_subcourse = TRUE AND course_meta.parent_course_id IS NOT NULL THEN course_meta.parent_course_id
+           ELSE cl.course_id
+         END AS course_id,
+         cl.title, cl.date, cl.type, cl.expected_duration_minutes,
          cl.points_start, cl.points_middle, cl.points_end,
          CASE
            WHEN cl.type = 'online' AND op.id IS NOT NULL THEN jsonb_build_object(
@@ -91,6 +96,7 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
            ELSE NULL
          END AS att_data
        FROM classes cl
+       JOIN courses course_meta ON course_meta.id = cl.course_id
        LEFT JOIN LATERAL (
          SELECT *
          FROM attendances
@@ -106,6 +112,7 @@ router.get('/performance', authMiddleware, async (req: AuthRequest, res: Respons
          LIMIT 1
        ) op ON TRUE
        WHERE cl.course_id = ANY($1::int[])
+          OR (course_meta.is_subcourse = TRUE AND course_meta.parent_course_id = ANY($1::int[]))
        ORDER BY cl.course_id, cl.date, cl.id`,
       [courseIds, ids]
     );

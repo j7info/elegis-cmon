@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video, BookOpen } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
@@ -14,6 +14,7 @@ export function CourseDetail() {
   const [courseData, setCourseData] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [classes, setClasses] = useState<any[]>([]);
+  const [subcourses, setSubcourses] = useState<any[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -48,6 +49,14 @@ export function CourseDetail() {
   const [now, setNow] = useState(Date.now());
   const [selfScanLoading, setSelfScanLoading] = useState<string | null>(null);
   const [selfScanFeedback, setSelfScanFeedback] = useState<Record<number, { type: 'success' | 'error'; message: string }>>({});
+  const [showSubcourseModal, setShowSubcourseModal] = useState(false);
+  const [subcourseTitle, setSubcourseTitle] = useState('');
+  const [subcourseDescription, setSubcourseDescription] = useState('');
+  const [subcourseDuration, setSubcourseDuration] = useState('');
+  const [isCreatingSubcourse, setIsCreatingSubcourse] = useState(false);
+  const [subcourseCandidates, setSubcourseCandidates] = useState<any[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [attachingCourseId, setAttachingCourseId] = useState<number | null>(null);
 
   const isStudent = user?.system_role === 'ALUNO';
 
@@ -55,8 +64,8 @@ export function CourseDetail() {
     if (!courseId) return;
     setLoadError(null);
     try {
+      const course = await api.get(`/courses/${courseId}`);
       const promises: Promise<any>[] = [
-        api.get(`/courses/${courseId}`),
         api.get(`/classes/course/${courseId}`)
       ];
 
@@ -66,12 +75,23 @@ export function CourseDetail() {
       }
 
       const results = await Promise.all(promises);
-      setCourseData(results[0]);
-      setClasses(results[1]);
+      setCourseData(course);
+      setClasses(results[0]);
+      if (!course.is_subcourse) {
+        try {
+          const subs = await api.get(`/courses/${courseId}/subcourses`);
+          setSubcourses(subs || []);
+        } catch (e) {
+          console.warn('Could not load subcourses', e);
+          setSubcourses([]);
+        }
+      } else {
+        setSubcourses([]);
+      }
       
       if (!isStudent) {
-        setStudentsReport(results[2]?.students || []);
-        setAllUsers(results[3] || []);
+        setStudentsReport(results[1]?.students || []);
+        setAllUsers(results[2] || []);
         
         // Carrega pendentes separadamente para não quebrar a tela caso a tabela não tenha a coluna status ainda
         try {
@@ -207,6 +227,60 @@ export function CourseDetail() {
     }
   };
 
+  const handleCreateSubcourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!courseId || !subcourseTitle.trim()) return;
+    setIsCreatingSubcourse(true);
+    try {
+      await api.post('/courses', {
+        parent_course_id: parseInt(courseId),
+        title: subcourseTitle.trim(),
+        description: subcourseDescription.trim(),
+        duration_hours: parseInt(subcourseDuration, 10) || 0,
+        enrollment_open: false,
+      });
+      setSubcourseTitle('');
+      setSubcourseDescription('');
+      setSubcourseDuration('');
+      setShowSubcourseModal(false);
+      await loadData();
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao criar subcurso');
+    } finally {
+      setIsCreatingSubcourse(false);
+    }
+  };
+
+  const openSubcourseModal = async () => {
+    setShowSubcourseModal(true);
+    if (!courseId || courseData?.is_subcourse) return;
+    setLoadingCandidates(true);
+    try {
+      const candidates = await api.get(`/courses/${courseId}/subcourse-candidates`);
+      setSubcourseCandidates(candidates || []);
+    } catch (err) {
+      console.warn('Could not load subcourse candidates', err);
+      setSubcourseCandidates([]);
+    } finally {
+      setLoadingCandidates(false);
+    }
+  };
+
+  const attachExistingCourse = async (candidateId: number) => {
+    if (!courseId) return;
+    setAttachingCourseId(candidateId);
+    try {
+      await api.post(`/courses/${courseId}/attach-subcourse`, { subcourse_id: candidateId });
+      await loadData();
+      const candidates = await api.get(`/courses/${courseId}/subcourse-candidates`);
+      setSubcourseCandidates(candidates || []);
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao vincular curso como subcurso');
+    } finally {
+      setAttachingCourseId(null);
+    }
+  };
+
   if (!courseData) {
     return (
       <div className="p-8 text-center">
@@ -247,8 +321,11 @@ export function CourseDetail() {
                 {format(new Date(courseData.start_date), 'dd/MM/yyyy')} — {courseData.end_date ? format(new Date(courseData.end_date), 'dd/MM/yyyy') : '...'}
               </span>
             )}
-            {courseData.parent_course_id && (
-              <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Reaproveitado</span>
+            {courseData.is_subcourse && (
+              <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Subcurso</span>
+            )}
+            {!courseData.is_subcourse && subcourses.length > 0 && (
+              <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{subcourses.length} subcurso{subcourses.length === 1 ? '' : 's'}</span>
             )}
             {!isStudent && (
               <span className={clsx(
@@ -277,6 +354,14 @@ export function CourseDetail() {
             >
               <Edit3 className="w-4 h-4" /> Editar Curso
             </button>
+            {!courseData.is_subcourse && (
+              <button
+                onClick={openSubcourseModal}
+                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium transition-colors border border-indigo-100 flex items-center gap-2 whitespace-nowrap text-sm"
+              >
+                <BookOpen className="w-4 h-4" /> Novo Subcurso
+              </button>
+            )}
             <button
               onClick={() => {
                 setReuseTitle(`${courseData.title} (nova turma)`);
@@ -289,7 +374,7 @@ export function CourseDetail() {
               <Copy className="w-4 h-4" /> Reutilizar Curso
             </button>
             <Link 
-              to={`/course/${courseId}/certificates`}
+              to={`/course/${courseData.is_subcourse ? courseData.parent_course_id : courseId}/certificates`}
               className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
             >
               <Award className="w-4 h-4" /> Certificados
@@ -300,9 +385,42 @@ export function CourseDetail() {
 
       <div className="grid md:grid-cols-3 gap-8">
         <div className={clsx("space-y-6", isStudent ? "md:col-span-3" : "md:col-span-2")}>
+          {!courseData.is_subcourse && subcourses.length > 0 && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-indigo-600" /> Subcursos
+                </h2>
+                {!isStudent && (
+                  <button
+                    type="button"
+                    onClick={openSubcourseModal}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-medium border border-indigo-100"
+                  >
+                    <Plus className="w-4 h-4" /> Subcurso
+                  </button>
+                )}
+              </div>
+              <div className="grid gap-3">
+                {subcourses.map(sc => (
+                  <Link key={sc.id} to={`/course/${sc.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors group">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-gray-900 group-hover:text-indigo-700 truncate">{sc.title}</h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {sc.class_count || 0} aula{Number(sc.class_count || 0) === 1 ? '' : 's'}
+                        {sc.duration_hours ? ` · ${sc.duration_hours}h` : ''}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-600" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!isStudent && (
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Nova Aula do Curso</h2>
+              <h2 className="text-lg font-medium text-gray-900 mb-4">{courseData.is_subcourse ? 'Nova Aula do Subcurso' : 'Nova Aula do Curso'}</h2>
               <form onSubmit={handleCreateClass} className="space-y-4">
                 <input 
                   type="text" 
@@ -820,6 +938,105 @@ export function CourseDetail() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showSubcourseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowSubcourseModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Subcursos de {courseData.title}</h2>
+              <button type="button" onClick={() => setShowSubcourseModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="max-h-[80vh] overflow-y-auto px-6 py-5 space-y-6">
+              <form onSubmit={handleCreateSubcourse} className="space-y-4 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+                <div>
+                  <h3 className="font-semibold text-gray-900">Criar subcurso novo</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    As aulas deste subcurso contarão para o certificado consolidado de <strong>{courseData.title}</strong>.
+                  </p>
+                </div>
+                <div className="grid sm:grid-cols-[1fr_120px] gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-sm font-medium text-gray-700">Título</label>
+                    <input
+                      type="text"
+                      value={subcourseTitle}
+                      onChange={e => setSubcourseTitle(e.target.value)}
+                      placeholder="Ex: Ferramentas de e-mail"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-sm font-medium text-gray-700">Carga (h)</label>
+                    <input
+                      type="number"
+                      value={subcourseDuration}
+                      onChange={e => setSubcourseDuration(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Descrição</label>
+                  <textarea
+                    value={subcourseDescription}
+                    onChange={e => setSubcourseDescription(e.target.value)}
+                    rows={2}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-white"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <button type="submit" disabled={isCreatingSubcourse || !subcourseTitle.trim()}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center gap-2">
+                    {isCreatingSubcourse ? <><Loader2 className="w-4 h-4 animate-spin" /> Criando...</> : <><Plus className="w-4 h-4" /> Criar Subcurso</>}
+                  </button>
+                </div>
+              </form>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="font-semibold text-gray-900">Vincular curso existente</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Use para reorganizar cursos já realizados. Aulas, presenças e certificados emitidos permanecem no curso original.
+                  </p>
+                </div>
+                {loadingCandidates ? (
+                  <div className="flex items-center justify-center gap-2 rounded-xl border border-gray-100 bg-gray-50 p-6 text-sm text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Carregando cursos...
+                  </div>
+                ) : subcourseCandidates.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+                    Nenhum curso disponível para vincular.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {subcourseCandidates.map(candidate => (
+                      <div key={candidate.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white p-3">
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 truncate">{candidate.title}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            {candidate.class_count || 0} aula{Number(candidate.class_count || 0) === 1 ? '' : 's'}
+                            {candidate.current_parent_title ? ` · hoje em ${candidate.current_parent_title}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => attachExistingCourse(candidate.id)}
+                          disabled={attachingCourseId === candidate.id}
+                          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                        >
+                          {attachingCourseId === candidate.id && <Loader2 className="w-4 h-4 animate-spin" />}
+                          Vincular
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -24,12 +24,25 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
   const cleanIdentifier = normalizeIdentifier(identifierText);
   const matriculaCandidate = identifierText.toUpperCase();
 
-  const classResult = await pool.query('SELECT * FROM classes WHERE id = $1', [classId]);
+  const classResult = await pool.query(
+    `SELECT cl.*, c.parent_course_id, c.is_subcourse
+     FROM classes cl
+     JOIN courses c ON c.id = cl.course_id
+     WHERE cl.id = $1`,
+    [classId]
+  );
   if (classResult.rows.length === 0) {
     return { status: 404, body: { error: 'Aula não encontrada' } };
   }
 
   const classData = classResult.rows[0];
+  const registrationCourseIds = Array.from(new Set([
+    classData.course_id,
+    classData.is_subcourse ? classData.parent_course_id : null,
+  ].filter(Boolean)));
+  const enrollmentCourseId = classData.is_subcourse && classData.parent_course_id
+    ? classData.parent_course_id
+    : classData.course_id;
 
   if (classData.status !== 'active') {
     return { status: 400, body: { error: 'Esta aula não está ativa no momento.' } };
@@ -59,8 +72,8 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
 
   if (!user) {
     const courseReg = await pool.query(
-      'SELECT full_name as name, role as cargo, department as departamento FROM registrations WHERE course_id = $1 AND (identifier = $2 OR identifier = $3) LIMIT 1',
-      [classData.course_id, cleanIdentifier, matriculaCandidate]
+      'SELECT full_name as name, role as cargo, department as departamento FROM registrations WHERE course_id = ANY($1::int[]) AND (identifier = $2 OR identifier = $3) LIMIT 1',
+      [registrationCourseIds, cleanIdentifier, matriculaCandidate]
     );
     if (courseReg.rows.length > 0) {
       user = courseReg.rows[0];
@@ -70,7 +83,7 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
   }
 
   let regResult = await pool.query(
-    `SELECT * FROM registrations WHERE course_id = $1 AND (
+    `SELECT * FROM registrations WHERE course_id = ANY($1::int[]) AND (
       identifier = $2
       OR identifier = $3
       OR EXISTS (
@@ -84,12 +97,12 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
            )
       )
     )`,
-    [classData.course_id, cleanIdentifier, matriculaCandidate]
+    [registrationCourseIds, cleanIdentifier, matriculaCandidate]
   );
 
   if (regResult.rows.length === 0) {
     if (!user?.id) {
-      return { status: 403, body: { error: 'NOT_ENROLLED', course_id: classData.course_id } };
+      return { status: 403, body: { error: 'NOT_ENROLLED', course_id: enrollmentCourseId } };
     }
 
     const registrationIdentifier = user.cpf || user.email
@@ -108,7 +121,7 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
          department = EXCLUDED.department,
          status = 'approved'
        RETURNING *`,
-      [classId, classData.course_id, registrationIdentifier, user.name, user.cargo, user.departamento]
+      [classId, enrollmentCourseId, registrationIdentifier, user.name, user.cargo, user.departamento]
     );
   }
 

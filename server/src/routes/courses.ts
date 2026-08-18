@@ -11,20 +11,40 @@ async function userCanAccessCourse(courseId: string, userId: number, role: strin
   if (role === 'ADMIN') return true;
 
   const { rows } = await pool.query(
-    `SELECT 1
-     FROM courses c
-     LEFT JOIN course_teachers ct ON c.id = ct.course_id
-     WHERE c.id = $1 AND (c.owner_id = $2 OR ct.teacher_id = $2)
+     `WITH course_scope AS (
+       SELECT id, owner_id FROM courses WHERE id = $1
+       UNION
+       SELECT id, owner_id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
+       UNION
+       SELECT p.id, p.owner_id
+       FROM courses c
+       JOIN courses p ON p.id = c.parent_course_id
+       WHERE c.id = $1 AND c.is_subcourse = TRUE
+     )
+     SELECT 1
+     FROM course_scope cs
+     LEFT JOIN course_teachers ct ON cs.id = ct.course_id
+     WHERE cs.owner_id = $2 OR ct.teacher_id = $2
      LIMIT 1`,
     [courseId, userId]
   );
   if (rows.length > 0) return true;
 
   const { rows: studentRows } = await pool.query(
-    `SELECT 1
+     `WITH course_scope AS (
+       SELECT id FROM courses WHERE id = $1
+       UNION
+       SELECT id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
+       UNION
+       SELECT p.id
+       FROM courses c
+       JOIN courses p ON p.id = c.parent_course_id
+       WHERE c.id = $1 AND c.is_subcourse = TRUE
+     )
+     SELECT 1
      FROM registrations r
      INNER JOIN app_users u ON ${studentIdentifiersCondition('r')}
-     WHERE r.course_id = $1 AND u.id = $2
+     WHERE r.course_id IN (SELECT id FROM course_scope) AND u.id = $2
      LIMIT 1`,
     [courseId, userId]
   );
@@ -56,10 +76,23 @@ function getOptionalUserId(req: AuthRequest): number | null {
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
-      `SELECT c.* FROM courses c 
-       LEFT JOIN course_teachers ct ON c.id = ct.course_id
-       WHERE c.owner_id = $1 OR ct.teacher_id = $1
-       GROUP BY c.id
+      `WITH accessible_courses AS (
+         SELECT c.id
+         FROM courses c
+         LEFT JOIN course_teachers ct ON c.id = ct.course_id
+         WHERE c.owner_id = $1 OR ct.teacher_id = $1
+         GROUP BY c.id
+       )
+       SELECT c.*,
+         COALESCE(subs.subcourse_count, 0)::int AS subcourse_count
+       FROM courses c
+       JOIN accessible_courses ac ON ac.id = c.id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS subcourse_count
+         FROM courses sc
+         WHERE sc.parent_course_id = c.id AND sc.is_subcourse = TRUE
+       ) subs ON TRUE
+       WHERE c.is_subcourse = FALSE
        ORDER BY c.created_at DESC`,
       [req.user!.id]
     );
@@ -85,9 +118,15 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
          pending.latest_pending_class
        FROM courses c
        INNER JOIN app_users u ON u.id = $1
-       LEFT JOIN registrations r
-         ON r.course_id = c.id
-        AND ${studentIdentifiersCondition('r')}
+       LEFT JOIN LATERAL (
+         SELECT r.*
+         FROM registrations r
+         LEFT JOIN courses sc ON sc.parent_course_id = c.id AND sc.is_subcourse = TRUE
+         WHERE r.course_id IN (c.id, sc.id)
+           AND ${studentIdentifiersCondition('r')}
+         ORDER BY CASE WHEN r.course_id = c.id THEN 0 ELSE 1 END, r.created_at DESC
+         LIMIT 1
+       ) r ON TRUE
        LEFT JOIN LATERAL (
          WITH pending_classes AS (
            SELECT cl.id, cl.title, cl.date, cl.type, cl.online_content_type, cl.status
@@ -108,7 +147,10 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
              ORDER BY op.completed_at DESC NULLS LAST, op.created_at DESC
              LIMIT 1
            ) op ON cl.type = 'online'
-           WHERE cl.course_id = c.id
+           JOIN courses pending_course
+             ON pending_course.id = cl.course_id
+            AND (pending_course.id = c.id OR (pending_course.parent_course_id = c.id AND pending_course.is_subcourse = TRUE))
+           WHERE TRUE
              AND cl.status IN ('scheduled', 'active')
              AND (
                (cl.type = 'online' AND op.completed_at IS NULL)
@@ -140,7 +182,8 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
            ) AS latest_pending_class
          FROM pending_classes
        ) pending ON r.id IS NOT NULL
-       WHERE r.id IS NOT NULL OR c.enrollment_open = TRUE
+       WHERE c.is_subcourse = FALSE
+         AND (r.id IS NOT NULL OR c.enrollment_open = TRUE)
        ORDER BY c.created_at DESC`,
       [req.user!.id]
     );
@@ -153,7 +196,7 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
 
 // POST /api/courses — Criar curso
 router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
-  const { title, description, duration_hours, additional_teachers, start_date, end_date, enrollment_open } = req.body;
+  const { title, description, duration_hours, additional_teachers, start_date, end_date, enrollment_open, parent_course_id } = req.body;
 
   if (!title?.trim()) {
     res.status(400).json({ error: 'Título é obrigatório' });
@@ -163,12 +206,45 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const parentCourseId = parent_course_id ? Number(parent_course_id) : null;
+    if (parentCourseId) {
+      const canAccessParent = await userCanAccessCourse(String(parentCourseId), req.user!.id, req.user!.system_role);
+      if (!canAccessParent) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Curso principal não encontrado' });
+        return;
+      }
+    }
+
     const { rows } = await client.query(
-      `INSERT INTO courses (title, description, duration_hours, owner_id, start_date, end_date, enrollment_open)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [title.trim(), description?.trim() || '', duration_hours || 0, req.user!.id, start_date || null, end_date || null, enrollment_open !== false]
+      `INSERT INTO courses (title, description, duration_hours, owner_id, start_date, end_date, enrollment_open, parent_course_id, is_subcourse)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [
+        title.trim(),
+        description?.trim() || '',
+        duration_hours || 0,
+        req.user!.id,
+        start_date || null,
+        end_date || null,
+        parentCourseId ? false : enrollment_open !== false,
+        parentCourseId,
+        Boolean(parentCourseId),
+      ]
     );
     const newCourse = rows[0];
+
+    if (parentCourseId) {
+      const { rows: parentTeachers } = await client.query(
+        'SELECT teacher_id FROM course_teachers WHERE course_id = $1',
+        [parentCourseId]
+      );
+      for (const t of parentTeachers) {
+        await client.query(
+          'INSERT INTO course_teachers (course_id, teacher_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [newCourse.id, t.teacher_id]
+        );
+      }
+    }
 
     if (Array.isArray(additional_teachers) && additional_teachers.length > 0) {
       for (const tId of additional_teachers) {
@@ -185,6 +261,171 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
     await client.query('ROLLBACK');
     console.error('Create course error:', err);
     res.status(500).json({ error: 'Erro ao criar curso' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/courses/:id/subcourses — Listar subcursos de um curso principal
+router.get('/:id/subcourses', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Curso não encontrado' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT sc.*,
+        COALESCE(class_stats.class_count, 0)::int AS class_count
+       FROM courses sc
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS class_count
+         FROM classes cl
+         WHERE cl.course_id = sc.id
+       ) class_stats ON TRUE
+       WHERE sc.parent_course_id = $1
+         AND sc.is_subcourse = TRUE
+       ORDER BY sc.created_at DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('List subcourses error:', err);
+    res.status(500).json({ error: 'Erro ao listar subcursos' });
+  }
+});
+
+// GET /api/courses/:id/subcourse-candidates — Cursos que podem virar subcurso deste curso principal
+router.get('/:id/subcourse-candidates', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Curso principal não encontrado' });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `WITH target AS (
+         SELECT id FROM courses WHERE id = $1 AND is_subcourse = FALSE
+       ),
+       accessible AS (
+         SELECT c.id
+         FROM courses c
+         LEFT JOIN course_teachers ct ON c.id = ct.course_id
+         WHERE $2 = TRUE OR c.owner_id = $3 OR ct.teacher_id = $3
+         GROUP BY c.id
+       )
+       SELECT c.*,
+         COALESCE(class_stats.class_count, 0)::int AS class_count,
+         parent.title AS current_parent_title
+       FROM courses c
+       JOIN accessible a ON a.id = c.id
+       CROSS JOIN target
+       LEFT JOIN courses parent ON parent.id = c.parent_course_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS class_count
+         FROM classes cl
+         WHERE cl.course_id = c.id
+       ) class_stats ON TRUE
+       WHERE c.id <> target.id
+         AND NOT (c.parent_course_id = target.id AND c.is_subcourse = TRUE)
+       ORDER BY c.is_subcourse, c.created_at DESC`,
+      [req.params.id, isAdmin(req.user), req.user!.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('List subcourse candidates error:', err);
+    res.status(500).json({ error: 'Erro ao listar cursos disponíveis para vincular' });
+  }
+});
+
+// POST /api/courses/:id/attach-subcourse — Vincular curso existente como subcurso
+router.post('/:id/attach-subcourse', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  const { subcourse_id } = req.body;
+  if (!subcourse_id || Number(subcourse_id) === Number(req.params.id)) {
+    res.status(400).json({ error: 'Informe um curso válido para vincular' });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const parentAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
+    const childAccess = await userCanAccessCourse(String(subcourse_id), req.user!.id, req.user!.system_role);
+    if (!parentAccess || !childAccess) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Curso não encontrado' });
+      return;
+    }
+
+    const { rows: [parent] } = await client.query(
+      'SELECT id, title, is_subcourse FROM courses WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    );
+    const { rows: [child] } = await client.query(
+      'SELECT id, title, parent_course_id, is_subcourse FROM courses WHERE id = $1 FOR UPDATE',
+      [subcourse_id]
+    );
+
+    if (!parent || parent.is_subcourse) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'O destino precisa ser um curso principal' });
+      return;
+    }
+    if (!child) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Curso a vincular não encontrado' });
+      return;
+    }
+
+    const { rows: descendants } = await client.query(
+      `WITH RECURSIVE descendants AS (
+         SELECT id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
+         UNION ALL
+         SELECT c.id
+         FROM courses c
+         JOIN descendants d ON c.parent_course_id = d.id
+         WHERE c.is_subcourse = TRUE
+       )
+       SELECT id FROM descendants WHERE id = $2`,
+      [subcourse_id, req.params.id]
+    );
+    if (descendants.length > 0) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: 'Não é possível vincular um curso ao próprio descendente' });
+      return;
+    }
+
+    const { rows: [updated] } = await client.query(
+      `UPDATE courses
+       SET parent_course_id = $1,
+           is_subcourse = TRUE,
+           enrollment_open = FALSE,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [req.params.id, subcourse_id]
+    );
+
+    const { rows: parentTeachers } = await client.query(
+      'SELECT teacher_id FROM course_teachers WHERE course_id = $1',
+      [req.params.id]
+    );
+    for (const teacher of parentTeachers) {
+      await client.query(
+        'INSERT INTO course_teachers (course_id, teacher_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [subcourse_id, teacher.teacher_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Curso vinculado como subcurso com sucesso', subcourse: updated });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Attach subcourse error:', err);
+    res.status(500).json({ error: 'Erro ao vincular subcurso' });
   } finally {
     client.release();
   }
@@ -456,7 +697,15 @@ router.get('/:id/students', authMiddleware, async (req: AuthRequest, res: Respon
     }
 
     const { rows } = await pool.query(
-      `WITH matched AS (
+      `WITH course_scope AS (
+         SELECT id FROM courses WHERE id = $1
+         UNION
+         SELECT p.id
+         FROM courses c
+         JOIN courses p ON p.id = c.parent_course_id
+         WHERE c.id = $1 AND c.is_subcourse = TRUE
+       ),
+       matched AS (
          SELECT
            r.*,
            u.id AS user_id,
@@ -490,7 +739,7 @@ router.get('/:id/students', authMiddleware, async (req: AuthRequest, res: Respon
              u.id
            LIMIT 1
          ) u ON TRUE
-         WHERE r.course_id = $1 AND r.status = 'approved'
+         WHERE r.course_id IN (SELECT id FROM course_scope) AND r.status = 'approved'
        ),
        ranked AS (
          SELECT

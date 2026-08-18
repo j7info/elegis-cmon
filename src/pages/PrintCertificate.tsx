@@ -26,6 +26,16 @@ function CertificatePages({ course, classesList, settings, studentInfo }: { cour
   const configText = certConfig.text || 'Certificamos que {{ALUNO}} concluiu com êxito o curso de {{CURSO}} com carga horária de {{CARGA_HORARIA}}h, alcançando a marca de {{PONTUACAO}} pontos e {{PERCENTUAL}}% de presença.';
   const formattedText = formatCertificateText(configText, studentInfo, course);
   const signatures: any[] = certConfig.signatures || [];
+  const groupedClasses = classesList.reduce((groups: Array<{ title: string; classes: any[] }>, classItem: any) => {
+    const title = classItem.is_subcourse ? (classItem.course_title || 'Subcurso') : 'Conteúdo principal';
+    let group = groups.find(g => g.title === title);
+    if (!group) {
+      group = { title, classes: [] };
+      groups.push(group);
+    }
+    group.classes.push(classItem);
+    return groups;
+  }, []);
 
   return (
     <>
@@ -69,12 +79,21 @@ function CertificatePages({ course, classesList, settings, studentInfo }: { cour
       <div className="w-[297mm] h-[210mm] bg-white shadow-xl print:shadow-none print:m-0 flex flex-col relative mb-12 print:mb-0 print:break-after-page p-16">
         <h2 className="text-2xl font-bold text-gray-900 mb-8 border-b-2 border-gray-200 pb-2 uppercase tracking-wider text-center">Conteúdo Programático</h2>
 
-        <div className="grid grid-cols-2 gap-x-16 gap-y-4">
-          {classesList.map((c: any, i: number) => (
-            <div key={c.id} className="text-sm text-gray-800 break-inside-avoid shadow-sm border border-gray-100 rounded-lg p-4">
-              <span className="font-bold block mb-1 text-teal-800">Módulo {i + 1}: {c.title}</span>
-              {c.description && <span className="text-gray-600 block line-clamp-3">{c.description}</span>}
-            </div>
+        <div className="space-y-6 overflow-hidden">
+          {groupedClasses.map((group, groupIndex) => (
+            <section key={group.title} className="break-inside-avoid">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-teal-800 mb-3">
+                {groupIndex + 1}. {group.title}
+              </h3>
+              <div className="grid grid-cols-2 gap-x-16 gap-y-3">
+                {group.classes.map((c: any, i: number) => (
+                  <div key={c.id} className="text-sm text-gray-800 break-inside-avoid shadow-sm border border-gray-100 rounded-lg p-3">
+                    <span className="font-bold block mb-1 text-gray-900">{i + 1}. {c.title}</span>
+                    {c.description && <span className="text-gray-600 block line-clamp-2">{c.description}</span>}
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>
@@ -98,7 +117,7 @@ export function PrintCertificate() {
       try {
         const [courseData, classesData, reportData] = await Promise.all([
           api.get(`/courses/${courseId}`),
-          api.get(`/classes/course/${courseId}`),
+          api.get(`/classes/course/${courseId}?scope=tree`),
           api.get(`/certificates/report/${courseId}`),
         ]);
 

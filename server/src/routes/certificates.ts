@@ -7,14 +7,24 @@ const router = Router();
 
 async function userCanAccessCourse(courseId: string | number, userId: number, role: string): Promise<boolean> {
   const { rows } = await pool.query(
-    `SELECT 1
-     FROM courses c
+     `WITH course_scope AS (
+       SELECT id, owner_id FROM courses WHERE id = $1
+       UNION
+       SELECT id, owner_id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
+       UNION
+       SELECT p.id, p.owner_id
+       FROM courses c
+       JOIN courses p ON p.id = c.parent_course_id
+       WHERE c.id = $1 AND c.is_subcourse = TRUE
+     )
+     SELECT 1
+     FROM course_scope c
      LEFT JOIN course_teachers ct ON c.id = ct.course_id
      LEFT JOIN app_users u ON u.id = $3
      LEFT JOIN registrations r
        ON r.course_id = c.id
       AND (r.identifier = u.cpf OR r.identifier = u.email OR r.identifier = u.matricula)
-     WHERE c.id = $1 AND ($2 = 'ADMIN' OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL)
+     WHERE $2 = 'ADMIN' OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL
      LIMIT 1`,
     [courseId, role, userId]
   );
@@ -92,10 +102,11 @@ async function getEvaluationScoresByClass(classIds: number[]): Promise<Map<strin
        JOIN evaluation_participants ep ON ep.id = oat.participant_id
        JOIN evaluations e ON e.id = oat.evaluation_id
        JOIN classes c ON c.id = e.class_id
+       LEFT JOIN courses class_course ON class_course.id = c.course_id
        LEFT JOIN app_users u
          ON ep.identifier = u.cpf OR ep.identifier = u.email OR ep.identifier = u.matricula
        LEFT JOIN registrations r
-         ON r.course_id = c.course_id
+         ON r.course_id IN (c.course_id, class_course.parent_course_id)
         AND (
           r.identifier = ep.identifier
           OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
@@ -129,10 +140,20 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       return;
     }
 
-    // Get all classes for the course (com os pesos de pontuação por aula)
-    const classesResult = await pool.query(
-      'SELECT id, points_start, points_middle, points_end FROM classes WHERE course_id = $1',
+    const { rows: scopeCourses } = await pool.query(
+      `SELECT id, title, parent_course_id, is_subcourse
+       FROM courses
+       WHERE id = $1
+          OR (parent_course_id = $1 AND is_subcourse = TRUE)
+       ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END, created_at, title`,
       [courseId]
+    );
+    const courseIds = scopeCourses.map((c: any) => c.id);
+
+    // Get all classes for the course and its subcourses (com os pesos de pontuação por aula)
+    const classesResult = await pool.query(
+      'SELECT id, course_id, points_start, points_middle, points_end FROM classes WHERE course_id = ANY($1::int[])',
+      [courseIds]
     );
     const classIds = classesResult.rows.map(r => r.id);
 
@@ -167,8 +188,9 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
         JOIN classes oc ON oc.id = p.class_id
         LEFT JOIN app_users u
           ON p.identifier = u.cpf OR p.identifier = u.email OR p.identifier = u.matricula
+        LEFT JOIN courses oc_course ON oc_course.id = oc.course_id
         LEFT JOIN registrations r
-          ON r.course_id = oc.course_id
+          ON r.course_id IN (oc.course_id, oc_course.parent_course_id)
          AND (
            r.identifier = p.identifier
            OR (u.cpf IS NOT NULL AND r.identifier = u.cpf)
@@ -215,7 +237,10 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
        FROM all_attendances a
        JOIN classes c ON a.class_id = c.id
        LEFT JOIN app_users u ON u.cpf = a.identifier OR u.email = a.identifier OR u.matricula = a.identifier
-       LEFT JOIN registrations r ON r.identifier = a.identifier AND r.course_id = c.course_id
+       LEFT JOIN courses class_course ON class_course.id = c.course_id
+       LEFT JOIN registrations r
+         ON r.identifier = a.identifier
+        AND r.course_id IN (c.course_id, class_course.parent_course_id)
        GROUP BY a.identifier
        ORDER BY points DESC`,
       [classIds]
@@ -232,7 +257,7 @@ router.get('/report/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       };
     });
 
-    res.json({ students, total_classes: classIds.length });
+    res.json({ students, total_classes: classIds.length, courses: scopeCourses });
   } catch (err) {
     console.error('Certificate report error:', err);
     res.status(500).json({ error: 'Erro ao gerar relatório' });

@@ -41,20 +41,40 @@ async function userCanAccessCourse(courseId: string | number, userId: number, ro
   if (role === 'ADMIN') return true;
 
   const { rows } = await pool.query(
-    `SELECT 1
-     FROM courses c
-     LEFT JOIN course_teachers ct ON c.id = ct.course_id
-     WHERE c.id = $1 AND (c.owner_id = $2 OR ct.teacher_id = $2)
+     `WITH course_scope AS (
+       SELECT id, owner_id FROM courses WHERE id = $1
+       UNION
+       SELECT id, owner_id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
+       UNION
+       SELECT p.id, p.owner_id
+       FROM courses c
+       JOIN courses p ON p.id = c.parent_course_id
+       WHERE c.id = $1 AND c.is_subcourse = TRUE
+     )
+     SELECT 1
+     FROM course_scope cs
+     LEFT JOIN course_teachers ct ON cs.id = ct.course_id
+     WHERE cs.owner_id = $2 OR ct.teacher_id = $2
      LIMIT 1`,
     [courseId, userId]
   );
   if (rows.length > 0) return true;
 
   const { rows: studentRows } = await pool.query(
-    `SELECT 1
+     `WITH course_scope AS (
+       SELECT id FROM courses WHERE id = $1
+       UNION
+       SELECT id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
+       UNION
+       SELECT p.id
+       FROM courses c
+       JOIN courses p ON p.id = c.parent_course_id
+       WHERE c.id = $1 AND c.is_subcourse = TRUE
+     )
+     SELECT 1
      FROM registrations r
      INNER JOIN app_users u ON ${studentIdentifiersCondition('r')}
-     WHERE r.course_id = $1 AND u.id = $2
+     WHERE r.course_id IN (SELECT id FROM course_scope) AND u.id = $2
      LIMIT 1`,
     [courseId, userId]
   );
@@ -66,13 +86,24 @@ async function userCanAccessClass(classId: string, userId: number, role: string)
     `SELECT 1
      FROM classes cl
      JOIN courses c ON cl.course_id = c.id
+     LEFT JOIN courses pc ON c.is_subcourse = TRUE AND pc.id = c.parent_course_id
      LEFT JOIN course_teachers ct ON c.id = ct.course_id
+     LEFT JOIN course_teachers pct ON pc.id = pct.course_id
      LEFT JOIN app_users u ON u.id = $3
      LEFT JOIN registrations r
-       ON r.course_id = c.id
+       ON r.course_id IN (c.id, c.parent_course_id)
       AND ${studentIdentifiersCondition('r')}
      WHERE cl.id = $1
-       AND ($2 = 'ADMIN' OR cl.owner_id = $3 OR cl.auxiliary_teacher_id = $3 OR c.owner_id = $3 OR ct.teacher_id = $3 OR r.id IS NOT NULL)
+       AND (
+         $2 = 'ADMIN'
+         OR cl.owner_id = $3
+         OR cl.auxiliary_teacher_id = $3
+         OR c.owner_id = $3
+         OR pc.owner_id = $3
+         OR ct.teacher_id = $3
+         OR pct.teacher_id = $3
+         OR r.id IS NOT NULL
+       )
      LIMIT 1`,
     [classId, role, userId]
   );
@@ -88,14 +119,20 @@ router.get('/course/:courseId', authMiddleware, async (req: AuthRequest, res: Re
       return;
     }
 
+    const includeSubcourses = req.query.scope === 'tree' || req.query.includeSubcourses === 'true';
     const { rows } = await pool.query(
       `SELECT c.*, 
-        CASE WHEN il.id IS NOT NULL THEN true ELSE false END as is_interactive
+        CASE WHEN il.id IS NOT NULL THEN true ELSE false END as is_interactive,
+        crs.title AS course_title,
+        crs.parent_course_id,
+        crs.is_subcourse
        FROM classes c
+       JOIN courses crs ON crs.id = c.course_id
        LEFT JOIN interactive_lessons il ON il.class_id = c.id
-       WHERE c.course_id = $1 
+       WHERE c.course_id = $1
+          OR ($2 = TRUE AND crs.parent_course_id = $1 AND crs.is_subcourse = TRUE)
        ORDER BY c.created_at DESC`,
-      [req.params.courseId]
+      [req.params.courseId, includeSubcourses]
     );
     res.json(rows);
   } catch (err) {

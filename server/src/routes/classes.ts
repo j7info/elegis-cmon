@@ -158,7 +158,8 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
       return;
     }
 
-    const contentType = online_content_type === 'video' ? 'video' : 'slides';
+    const classType = type === 'practical' ? 'practical' : type === 'online' ? 'online' : 'presential';
+    const contentType = classType === 'online' && online_content_type === 'video' ? 'video' : 'slides';
     const videoId = contentType === 'video' ? parseYouTubeVideoId(video_url) : null;
     if (contentType === 'video' && !videoId) {
       res.status(400).json({ error: 'Informe uma URL valida do YouTube' });
@@ -170,8 +171,8 @@ router.post('/', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequ
        VALUES ($1, $2, $3, COALESCE($4, NOW()), $5, $6, 'scheduled', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
       [
         course_id, title.trim(), description?.trim() || '', date || null, qr_duration_minutes || 10, req.user!.id, auxiliary_teacher_id || null,
-        points_start ?? 40, points_middle ?? 30, points_end ?? 30,
-        type || 'presential', expected_duration_minutes || null, slide_minimum_seconds || 30,
+        points_start ?? (classType === 'practical' ? 50 : 40), classType === 'practical' ? 0 : (points_middle ?? 30), points_end ?? (classType === 'practical' ? 50 : 30),
+        classType, classType === 'online' ? (expected_duration_minutes || null) : null, classType === 'online' ? (slide_minimum_seconds || 30) : null,
         contentType, contentType === 'video' ? video_url.trim() : null, contentType === 'video' ? 'youtube' : null, videoId, video_duration_seconds || null,
       ]
     );
@@ -254,6 +255,15 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
       return;
     }
 
+    const currentClassResult = await pool.query('SELECT type FROM classes WHERE id = $1', [req.params.id]);
+    const resultingType = type === 'practical'
+      ? 'practical'
+      : type === 'online'
+        ? 'online'
+        : type === 'presential'
+          ? 'presential'
+          : currentClassResult.rows[0]?.type;
+
     const setClauses: string[] = ['updated_at = NOW()'];
     const values: any[] = [];
     let paramIdx = 1;
@@ -283,7 +293,7 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
       setClauses.push(`qr_start_at = $${paramIdx++}`);
       values.push(qr_start_at);
     }
-    if (qr_middle_at !== undefined) {
+    if (qr_middle_at !== undefined && resultingType !== 'practical') {
       setClauses.push(`qr_middle_at = $${paramIdx++}`);
       values.push(qr_middle_at);
     }
@@ -299,7 +309,9 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
       setClauses.push(`points_start = $${paramIdx++}`);
       values.push(points_start);
     }
-    if (points_middle !== undefined) {
+    if (resultingType === 'practical') {
+      setClauses.push('points_middle = 0', 'qr_middle_at = NULL');
+    } else if (points_middle !== undefined) {
       setClauses.push(`points_middle = $${paramIdx++}`);
       values.push(points_middle);
     }
@@ -309,7 +321,7 @@ router.put('/:id', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRe
     }
     if (type !== undefined) {
       setClauses.push(`type = $${paramIdx++}`);
-      values.push(type);
+      values.push(resultingType);
     }
     if (expected_duration_minutes !== undefined) {
       setClauses.push(`expected_duration_minutes = $${paramIdx++}`);

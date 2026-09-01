@@ -36,6 +36,9 @@ async function registerAttendance(classId: string, step: AttendanceStep, rawIden
   }
 
   const classData = classResult.rows[0];
+  if (classData.type === 'practical' && step === 'middle') {
+    return { status: 400, body: { error: 'A aula prática possui somente registros de entrada e saída.' } };
+  }
   const registrationCourseIds = Array.from(new Set([
     classData.course_id,
     classData.is_subcourse ? classData.parent_course_id : null,

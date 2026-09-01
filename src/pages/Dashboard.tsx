@@ -163,7 +163,9 @@ export function Dashboard() {
     const pendingLabel = pendingCount === 1 ? '1 aula pendente' : `${pendingCount} aulas pendentes`;
     const pendingTypeLabel = latestPendingClass?.type === 'online'
       ? latestPendingClass?.online_content_type === 'video' ? 'Vídeo novo para assistir' : 'Aula online nova'
-      : 'Aula presencial pendente';
+      : latestPendingClass?.type === 'practical'
+        ? 'Aula prática pendente'
+        : 'Aula presencial pendente';
     const card = (
       <div className={clsx(
         "bg-white p-6 rounded-xl shadow-sm border hover:shadow-md transition-all h-full flex flex-col",

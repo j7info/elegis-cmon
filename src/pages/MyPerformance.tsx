@@ -36,7 +36,7 @@ interface ClassPerf {
   id: number;
   title: string;
   date: string;
-  type?: 'online' | 'presential';
+  type?: 'online' | 'presential' | 'practical';
   order_index?: number;
   attendance: Attendance | null;
   evaluation_count: number;

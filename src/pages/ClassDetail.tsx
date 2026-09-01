@@ -4,10 +4,11 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video, UserCheck, Search } from 'lucide-react';
+import { ArrowLeft, Users, Download, Play, CheckCircle2, Presentation, FileUp, FileText, Copy, Clock, PlayCircle, BarChart2, Pencil, Trash2, X, Award, HelpCircle, Plus, Eye, BookOpen, Video, UserCheck, Search, Link as LinkIcon } from 'lucide-react';
 import clsx from 'clsx';
 import { PresentationViewer } from '../components/PresentationViewer';
 import { InteractivePresentationViewer } from '../components/InteractivePresentationViewer';
+import { PracticalAttendanceViewer } from '../components/PracticalAttendanceViewer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { AttemptDetailsModal } from '../components/AttemptDetailsModal';
 import { maskIdentifier } from '../lib/format';
@@ -23,6 +24,7 @@ export function ClassDetail() {
   const [evalScores, setEvalScores] = useState<any[]>([]);
   const [presentationFile, setPresentationFile] = useState<File | null>(null);
   const [showInteractivePresentation, setShowInteractivePresentation] = useState(false);
+  const [showPracticalPresentation, setShowPracticalPresentation] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   
   const [isEditingClass, setIsEditingClass] = useState(false);
@@ -55,7 +57,7 @@ export function ClassDetail() {
   const [pointsEndInput, setPointsEndInput] = useState('30');
 
   // Online class settings
-  const [editType, setEditType] = useState<'presential' | 'online'>('presential');
+  const [editType, setEditType] = useState<'presential' | 'practical' | 'online'>('presential');
   const [editOnlineContentType, setEditOnlineContentType] = useState<'slides' | 'video'>('slides');
   const [editExpectedDuration, setEditExpectedDuration] = useState('30');
   const [editSlideMinSeconds, setEditSlideMinSeconds] = useState('30');
@@ -158,6 +160,7 @@ export function ClassDetail() {
   const pEnd = classData.points_end ?? 30;
   const pTotal = pStart + pMiddle + pEnd;
   const isOnlineClass = classData.type === 'online';
+  const isPracticalClass = classData.type === 'practical';
   const calcPoints = (att: any) => {
     if (att?.justification != null) {
       return Math.round((pStart + pMiddle + pEnd) * att.justification / 100);
@@ -274,7 +277,7 @@ export function ClassDetail() {
       }
 
       // Anexa/substitui o PDF ou ZIP, se um novo foi selecionado
-      if (editPdfFile && editOnlineContentType !== 'video') {
+      if (editPdfFile && editOnlineContentType !== 'video' && editType !== 'practical') {
         const fd = new FormData();
         fd.append('file', editPdfFile);
         if (classData.is_interactive) {
@@ -302,7 +305,7 @@ export function ClassDetail() {
 
   const savePoints = async () => {
     const ps = parseInt(pointsStartInput, 10);
-    const pm = parseInt(pointsMiddleInput, 10);
+    const pm = isPracticalClass ? 0 : parseInt(pointsMiddleInput, 10);
     const pe = parseInt(pointsEndInput, 10);
     if ([ps, pm, pe].some(v => isNaN(v) || v < 0)) return;
     await updateClass({ points_start: ps, points_middle: pm, points_end: pe });
@@ -312,6 +315,11 @@ export function ClassDetail() {
   // Abre a aula interativa no visualizador presencial próprio. Para as demais
   // aulas, usa o PDF salvo ou pede um arquivo na hora.
   const handlePresent = async () => {
+    if (isPracticalClass) {
+      setShowPracticalPresentation(true);
+      return;
+    }
+
     if (classData.is_interactive) {
       setShowInteractivePresentation(true);
       return;
@@ -341,7 +349,11 @@ export function ClassDetail() {
 
   const exportCSV = () => {
     if (registrations.length === 0) return;
-    const headers = ['Nome Completo', 'CPF/Email', 'Função', 'Departamento', `Chegada (Início ${pStart})`, `Confirmação (Meio ${pMiddle})`, `Saída (Fim ${pEnd})`, 'Pontuação'];
+    const headers = [
+      'Nome Completo', 'CPF/Email', 'Função', 'Departamento', `Chegada (Início ${pStart})`,
+      ...(!isPracticalClass ? [`Confirmação (Meio ${pMiddle})`] : []),
+      `Saída (Fim ${pEnd})`, 'Pontuação'
+    ];
     const escapeCsv = (val: any) => `"${String(val || '').replace(/"/g, '""')}"`;
     const formatTime = (ts: number | string | undefined | null) => {
       if (ts == null) return 'Falta';
@@ -358,7 +370,7 @@ export function ClassDetail() {
         escapeCsv(reg.role),
         escapeCsv(reg.department),
         escapeCsv(att ? formatTime(att.scan_start) : 'Falta'),
-        escapeCsv(att ? formatTime(att.scan_middle) : 'Falta'),
+        ...(!isPracticalClass ? [escapeCsv(att ? formatTime(att.scan_middle) : 'Falta')] : []),
         escapeCsv(att ? formatTime(att.scan_end) : 'Falta'),
         calcPoints(att)
       ].join(',');
@@ -396,7 +408,7 @@ export function ClassDetail() {
         <td>${esc(reg.role)}</td>
         <td>${esc(reg.department)}</td>
         <td class="c">${fmt(att?.scan_start)}</td>
-        <td class="c">${fmt(att?.scan_middle)}</td>
+        ${!isPracticalClass ? `<td class="c">${fmt(att?.scan_middle)}</td>` : ''}
         <td class="c">${fmt(att?.scan_end)}</td>
         <td class="c b">${calcPoints(att)}</td>
         <td class="c">${evalPts}</td>
@@ -432,12 +444,12 @@ export function ClassDetail() {
       </div>
       <div class="class-info">
         <h3>${esc(classData.title)}</h3>
-        <p class="sub">Data da aula: ${dateStr} &nbsp;|&nbsp; Pontuação: Início ${pStart} / Meio ${pMiddle} / Fim ${pEnd} (total ${pTotal}) &nbsp;|&nbsp; ${registrations.length} aluno(s)</p>
+        <p class="sub">Data da aula: ${dateStr} &nbsp;|&nbsp; Pontuação: ${isPracticalClass ? `Início ${pStart} / Fim ${pEnd}` : `Início ${pStart} / Meio ${pMiddle} / Fim ${pEnd}`} (total ${pTotal}) &nbsp;|&nbsp; ${registrations.length} aluno(s)</p>
       </div>
       <table>
         <thead><tr>
           <th>Nome</th><th>Identificação</th><th>Função</th><th>Departamento</th>
-          <th class="c">Início (${pStart})</th><th class="c">Meio (${pMiddle})</th><th class="c">Fim (${pEnd})</th><th class="c">Presença</th><th class="c">Nota</th>
+          <th class="c">Início (${pStart})</th>${!isPracticalClass ? `<th class="c">Meio (${pMiddle})</th>` : ''}<th class="c">Fim (${pEnd})</th><th class="c">Presença</th><th class="c">Nota</th>
         </tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
@@ -698,14 +710,18 @@ export function ClassDetail() {
               <div className="flex items-center gap-1.5">
                 <input type="number" min="0" value={pointsStartInput} onChange={e => setPointsStartInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Início" />
                 <span className="text-gray-300">/</span>
-                <input type="number" min="0" value={pointsMiddleInput} onChange={e => setPointsMiddleInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Meio" />
-                <span className="text-gray-300">/</span>
+                {!isPracticalClass && (
+                  <>
+                    <input type="number" min="0" value={pointsMiddleInput} onChange={e => setPointsMiddleInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Meio" />
+                    <span className="text-gray-300">/</span>
+                  </>
+                )}
                 <input type="number" min="0" value={pointsEndInput} onChange={e => setPointsEndInput(e.target.value)} className="w-12 px-1.5 py-1 text-sm border rounded outline-none text-center" title="Fim" />
                 <button onClick={savePoints} className="text-xs font-bold text-teal-600 ml-1">Salvar</button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-gray-800">{pStart} / {pMiddle} / {pEnd}</span>
+                <span className="text-sm font-bold text-gray-800">{isPracticalClass ? `${pStart} / ${pEnd}` : `${pStart} / ${pMiddle} / ${pEnd}`}</span>
                 {classData.status !== 'completed' && <button onClick={() => setEditingPoints(true)} className="text-xs text-teal-600 underline">Editar</button>}
               </div>
             )}
@@ -740,11 +756,11 @@ export function ClassDetail() {
           )}
           {classData.status === 'active' && (
             <>
-              {!classData.is_interactive && (
+              {!classData.is_interactive && !isPracticalClass && (
                 <input type="file" accept="application/pdf" ref={fileInputRef} className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) setPresentationFile(file); }} />
               )}
               <button onClick={handlePresent} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-                <Presentation className="w-4 h-4" /> {classData.is_interactive ? 'Apresentar presencialmente' : (classData.presentation_url ? 'Apresentar' : 'Apresentar PDF')}
+                <Presentation className="w-4 h-4" /> {isPracticalClass ? 'Apresentar QR Codes' : classData.is_interactive ? 'Apresentar presencialmente' : (classData.presentation_url ? 'Apresentar' : 'Apresentar PDF')}
               </button>
               <button onClick={() => updateClass({ status: 'completed' })} className="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4" /> Concluir Aula
@@ -869,14 +885,18 @@ export function ClassDetail() {
       {classData.status === 'scheduled' && classData.type !== 'online' && (
         <div className="bg-teal-50 border border-teal-100 p-6 rounded-xl text-teal-800 flex flex-col items-center justify-center text-center">
           <LinkIcon className="w-10 h-10 text-teal-400 mb-3" />
-          <h3 className="text-lg font-bold mb-1">Aula presencial agendada</h3>
-          <p className="text-teal-600 mb-6">Compartilhe o link de cadastro com os alunos antes de iniciar a aula.</p>
-          <div className="flex bg-white rounded-lg border border-teal-200 overflow-hidden shadow-sm">
-            <input type="text" readOnly value={linkToShare} className="px-4 py-3 outline-none text-gray-500 w-80 text-sm" />
-            <button onClick={copyLink} className="px-6 py-3 bg-teal-600 text-white font-medium hover:bg-teal-700 transition-colors">
-              {linkCopied ? 'Copiado!' : 'Copiar'}
-            </button>
-          </div>
+          <h3 className="text-lg font-bold mb-1">{isPracticalClass ? 'Aula prática agendada' : 'Aula presencial agendada'}</h3>
+          <p className="text-teal-600 mb-6">
+            {isPracticalClass ? 'Inicie a aula para abrir as chamadas de entrada e saída.' : 'Compartilhe o link de cadastro com os alunos antes de iniciar a aula.'}
+          </p>
+          {!isPracticalClass && (
+            <div className="flex bg-white rounded-lg border border-teal-200 overflow-hidden shadow-sm">
+              <input type="text" readOnly value={linkToShare} className="px-4 py-3 outline-none text-gray-500 w-80 text-sm" />
+              <button onClick={copyLink} className="px-6 py-3 bg-teal-600 text-white font-medium hover:bg-teal-700 transition-colors">
+                {linkCopied ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -896,7 +916,7 @@ export function ClassDetail() {
       )}
 
       {classData.status === 'active' && classData.type !== 'online' && (
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className={clsx('grid gap-6', isPracticalClass ? 'md:grid-cols-2' : 'md:grid-cols-3')}>
           <QRCard
             url={`${appUrl}/#/s/${classId}/start`}
             title={`Entrada (Início) - ${pStart} pts`}
@@ -907,16 +927,18 @@ export function ClassDetail() {
             onActivate={() => activateQRStep('start')}
             durationMinutes={classData.qr_duration_minutes || 10}
           />
-          <QRCard
-            url={`${appUrl}/#/s/${classId}/middle`}
-            title={`Presença (Meio) - ${pMiddle} pts`}
-            description={`Janela de presença (${classData.qr_duration_minutes || 10} min)`}
-            step="middle"
-            attendances={attendances}
-            activeAt={classData.qr_middle_at}
-            onActivate={() => activateQRStep('middle')}
-            durationMinutes={classData.qr_duration_minutes || 10}
-          />
+          {!isPracticalClass && (
+            <QRCard
+              url={`${appUrl}/#/s/${classId}/middle`}
+              title={`Presença (Meio) - ${pMiddle} pts`}
+              description={`Janela de presença (${classData.qr_duration_minutes || 10} min)`}
+              step="middle"
+              attendances={attendances}
+              activeAt={classData.qr_middle_at}
+              onActivate={() => activateQRStep('middle')}
+              durationMinutes={classData.qr_duration_minutes || 10}
+            />
+          )}
           <QRCard
             url={`${appUrl}/#/s/${classId}/end`}
             title={`Saída (Fim) - ${pEnd} pts`}
@@ -998,7 +1020,7 @@ export function ClassDetail() {
                 <th className="px-4 py-3 text-gray-700">Nome</th>
                 <th className="px-4 py-3 text-gray-700">Identificação</th>
                 <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Acesso' : `Início (${pStart})`}</th>
-                <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? (classData.online_content_type === 'video' ? 'Vídeo' : 'Slides') : `Meio (${pMiddle})`}</th>
+                {!isPracticalClass && <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? (classData.online_content_type === 'video' ? 'Vídeo' : 'Slides') : `Meio (${pMiddle})`}</th>}
                 <th className="px-4 py-3 text-gray-700 text-center">{isOnlineClass ? 'Tempo' : `Fim (${pEnd})`}</th>
                 <th className="px-4 py-3 text-gray-700 text-center font-bold">{isOnlineClass ? 'Presença' : 'Total'}</th>
                 <th className="px-4 py-3 text-gray-700 text-center">Avaliação</th>
@@ -1007,7 +1029,7 @@ export function ClassDetail() {
             </thead>
             <tbody>
               {registrations.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
+                <tr><td colSpan={isPracticalClass ? 7 : 8} className="px-4 py-8 text-center text-gray-400">Nenhum aluno cadastrado ainda.</td></tr>
               ) : (
                 registrations.map(reg => {
                   const att = findAttendance(reg);
@@ -1021,7 +1043,7 @@ export function ClassDetail() {
                           ? (att ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)
                           : (att?.scan_start ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)}
                       </td>
-                      <td className="px-4 py-3 text-center text-xs">
+                      {!isPracticalClass && <td className="px-4 py-3 text-center text-xs">
                         {isOnlineClass
                           ? att?.source === 'manual'
                             ? (
@@ -1039,7 +1061,7 @@ export function ClassDetail() {
                             )
                             : <span className="text-gray-300">-</span>
                           : (att?.scan_middle ? <CheckCircle2 className="w-4 h-4 mx-auto text-green-500" /> : <span className="text-gray-300">-</span>)}
-                      </td>
+                      </td>}
                       <td className="px-4 py-3 text-center text-xs">
                         {isOnlineClass && att?.source === 'manual'
                           ? <span className="text-gray-300">—</span>
@@ -1389,6 +1411,19 @@ export function ClassDetail() {
         </ErrorBoundary>
       )}
 
+      {showPracticalPresentation && (
+        <ErrorBoundary>
+          <PracticalAttendanceViewer
+            onClose={() => setShowPracticalPresentation(false)}
+            classId={classId!}
+            appUrl={appUrl}
+            attendances={attendances}
+            onActivateQR={activateQRStep}
+            classData={classData}
+          />
+        </ErrorBoundary>
+      )}
+
       {isEditingClass && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -1427,6 +1462,18 @@ export function ClassDetail() {
                     )}
                   >
                     Presencial
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditType('practical')}
+                    className={clsx(
+                      'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                      editType === 'practical'
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    Prática
                   </button>
                   <button
                     type="button"
@@ -1572,7 +1619,7 @@ export function ClassDetail() {
                 </select>
               </div>
 
-              {editOnlineContentType !== 'video' && (
+              {editOnlineContentType !== 'video' && editType !== 'practical' && (
               <div>
                 <label className="text-sm font-medium text-gray-700">
                   {classData.is_interactive ? 'Arquivo da Aula Interativa (.ZIP)' : 'PDF de Apresentação'}

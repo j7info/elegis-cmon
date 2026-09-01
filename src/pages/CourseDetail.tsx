@@ -28,7 +28,7 @@ export function CourseDetail() {
   const [studentsReport, setStudentsReport] = useState<any[]>([]);
   const [pendingRegistrations, setPendingRegistrations] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [newClassType, setNewClassType] = useState<'presential' | 'online' | 'interactive' | 'video'>('presential');
+  const [newClassType, setNewClassType] = useState<'presential' | 'practical' | 'online' | 'interactive' | 'video'>('presential');
   const [interactiveFile, setInteractiveFile] = useState<File | null>(null);
   const [newExpectedDuration, setNewExpectedDuration] = useState('30');
   const [newSlideMinSeconds, setNewSlideMinSeconds] = useState('30');
@@ -59,6 +59,20 @@ export function CourseDetail() {
   const [attachingCourseId, setAttachingCourseId] = useState<number | null>(null);
 
   const isStudent = user?.system_role === 'ALUNO';
+
+  const selectNewClassType = (type: 'presential' | 'practical' | 'online' | 'interactive' | 'video') => {
+    if (type === 'practical') {
+      setPointsStart('50');
+      setPointsMiddle('0');
+      setPointsEnd('50');
+      setNewPdfFile(null);
+    } else if (newClassType === 'practical') {
+      setPointsStart('40');
+      setPointsMiddle('30');
+      setPointsEnd('30');
+    }
+    setNewClassType(type);
+  };
 
   const loadData = async () => {
     if (!courseId) return;
@@ -126,7 +140,9 @@ export function CourseDetail() {
   const getActiveAttendanceStep = (classItem: any): 'start' | 'middle' | 'end' | null => {
     if (!isStudent || classItem.type === 'online' || classItem.status !== 'active') return null;
     const durationMs = (classItem.qr_duration_minutes || 10) * 60 * 1000;
-    const steps: Array<'start' | 'middle' | 'end'> = ['start', 'middle', 'end'];
+    const steps: Array<'start' | 'middle' | 'end'> = classItem.type === 'practical'
+      ? ['start', 'end']
+      : ['start', 'middle', 'end'];
 
     for (const step of steps) {
       const activeAt = classItem[`qr_${step}_at`];
@@ -183,7 +199,7 @@ export function CourseDetail() {
         qr_duration_minutes: 10,
         auxiliary_teacher_id: auxiliaryTeacherId ? parseInt(auxiliaryTeacherId) : undefined,
         points_start: parseInt(pointsStart, 10) || 0,
-        points_middle: parseInt(pointsMiddle, 10) || 0,
+        points_middle: newClassType === 'practical' ? 0 : (parseInt(pointsMiddle, 10) || 0),
         points_end: parseInt(pointsEnd, 10) || 0,
         type: (newClassType === 'interactive' || newClassType === 'video') ? 'online' : newClassType,
         is_interactive: newClassType === 'interactive',
@@ -194,7 +210,7 @@ export function CourseDetail() {
       });
 
       // Anexa o PDF de apresentação, se selecionado e não for interativa
-      if (newPdfFile && created?.id && newClassType !== 'interactive') {
+      if (newPdfFile && created?.id && newClassType !== 'interactive' && newClassType !== 'practical') {
         const fd = new FormData();
         fd.append('file', newPdfFile);
         await api.upload(`/classes/${created.id}/presentation`, fd);
@@ -497,10 +513,10 @@ export function CourseDetail() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo de Aula</label>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <button
                       type="button"
-                      onClick={() => setNewClassType('interactive')}
+                      onClick={() => selectNewClassType('interactive')}
                       className={clsx(
                         'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
                         newClassType === 'interactive'
@@ -512,7 +528,7 @@ export function CourseDetail() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNewClassType('presential')}
+                      onClick={() => selectNewClassType('presential')}
                       className={clsx(
                         'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
                         newClassType === 'presential'
@@ -524,7 +540,19 @@ export function CourseDetail() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNewClassType('online')}
+                      onClick={() => selectNewClassType('practical')}
+                      className={clsx(
+                        'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
+                        newClassType === 'practical'
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                          : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      Aula Prática
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectNewClassType('online')}
                       className={clsx(
                         'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
                         newClassType === 'online'
@@ -536,7 +564,7 @@ export function CourseDetail() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNewClassType('video')}
+                      onClick={() => selectNewClassType('video')}
                       className={clsx(
                         'flex-1 px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all',
                         newClassType === 'video'
@@ -620,17 +648,19 @@ export function CourseDetail() {
 
                 <div className="flex flex-col gap-2">
                   <label className="text-sm font-medium text-gray-700">Pontuação da Aula</label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className={clsx('grid gap-3', newClassType === 'practical' ? 'grid-cols-2' : 'grid-cols-3')}>
                     <div>
                       <span className="text-xs text-gray-500">Início</span>
                       <input type="number" min="0" value={pointsStart} onChange={e => setPointsStart(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
                     </div>
-                    <div>
-                      <span className="text-xs text-gray-500">Meio</span>
-                      <input type="number" min="0" value={pointsMiddle} onChange={e => setPointsMiddle(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
-                    </div>
+                    {newClassType !== 'practical' && (
+                      <div>
+                        <span className="text-xs text-gray-500">Meio</span>
+                        <input type="number" min="0" value={pointsMiddle} onChange={e => setPointsMiddle(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" />
+                      </div>
+                    )}
                     <div>
                       <span className="text-xs text-gray-500">Fim</span>
                       <input type="number" min="0" value={pointsEnd} onChange={e => setPointsEnd(e.target.value)}
@@ -654,7 +684,7 @@ export function CourseDetail() {
                         onChange={e => setInteractiveFile(e.target.files?.[0] || null)} />
                     </label>
                   </div>
-                ) : newClassType === 'video' ? null : (
+                ) : newClassType === 'video' || newClassType === 'practical' ? null : (
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium text-gray-700">PDF de Apresentação (opcional)</label>
                     <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors">
@@ -711,6 +741,11 @@ export function CourseDetail() {
                               {c.online_content_type === 'video' ? 'Vídeo' : 'Online'}
                             </span>
                           )}
+                          {c.type === 'practical' && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">
+                              Aula Prática
+                            </span>
+                          )}
                           {activeAttendanceStep && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-teal-100 text-teal-700">
                               Chamada de {getStepLabel(activeAttendanceStep)} aberta
@@ -737,6 +772,11 @@ export function CourseDetail() {
                               c.online_content_type === 'video' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
                             )}>
                               {c.online_content_type === 'video' ? 'Vídeo' : 'Online'}
+                            </span>
+                          )}
+                          {c.type === 'practical' && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">
+                              Aula Prática
                             </span>
                           )}
                         </div>

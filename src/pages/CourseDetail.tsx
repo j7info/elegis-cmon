@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video, BookOpen } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video, BookOpen, Unlink } from 'lucide-react';
 import clsx from 'clsx';
 
 export function CourseDetail() {
@@ -275,9 +275,23 @@ export function CourseDetail() {
       const candidates = await api.get(`/courses/${courseId}/subcourse-candidates`);
       setSubcourseCandidates(candidates || []);
     } catch (err: any) {
-      alert(err?.message || 'Erro ao vincular curso como subcurso');
+      alert(err?.message || 'Erro ao importar cópia limpa do curso');
     } finally {
       setAttachingCourseId(null);
+    }
+  };
+
+  const detachSubcourse = async (subcourse: any) => {
+    if (!courseId) return;
+    const confirmed = window.confirm(
+      `Desvincular "${subcourse.title}" deste curso principal? O curso voltará para a página inicial com todo o histórico preservado.`
+    );
+    if (!confirmed) return;
+    try {
+      await api.delete(`/courses/${courseId}/subcourses/${subcourse.id}`);
+      await loadData();
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao desvincular subcurso');
     }
   };
 
@@ -403,16 +417,25 @@ export function CourseDetail() {
               </div>
               <div className="grid gap-3">
                 {subcourses.map(sc => (
-                  <Link key={sc.id} to={`/course/${sc.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors group">
+                  <div key={sc.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors group">
                     <div className="min-w-0">
-                      <h3 className="font-semibold text-gray-900 group-hover:text-indigo-700 truncate">{sc.title}</h3>
+                      <Link to={`/course/${sc.id}`} className="font-semibold text-gray-900 group-hover:text-indigo-700 truncate block">{sc.title}</Link>
                       <p className="text-xs text-gray-500 mt-1">
                         {sc.class_count || 0} aula{Number(sc.class_count || 0) === 1 ? '' : 's'}
                         {sc.duration_hours ? ` · ${sc.duration_hours}h` : ''}
                       </p>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-600" />
-                  </Link>
+                    <div className="flex items-center gap-1">
+                      {!isStudent && (
+                        <button type="button" onClick={() => detachSubcourse(sc)} title="Desvincular subcurso" className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md">
+                          <Unlink className="w-4 h-4" />
+                        </button>
+                      )}
+                      <Link to={`/course/${sc.id}`} title="Abrir subcurso" className="p-2 text-gray-400 group-hover:text-indigo-600 rounded-md hover:bg-indigo-50">
+                        <ChevronRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -998,9 +1021,9 @@ export function CourseDetail() {
 
               <div className="space-y-3">
                 <div>
-                  <h3 className="font-semibold text-gray-900">Vincular curso existente</h3>
+                  <h3 className="font-semibold text-gray-900">Importar curso como cópia limpa</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Use para colocar cursos já existentes dentro de <strong>{courseData.title}</strong>. Aulas, presenças e certificados emitidos permanecem preservados.
+                    Cria em <strong>{courseData.title}</strong> uma nova cópia do curso e de suas aulas. O curso original mantém alunos, presenças, notas, progresso e certificados; a cópia começa sem histórico.
                   </p>
                 </div>
                 {loadingCandidates ? (
@@ -1009,7 +1032,7 @@ export function CourseDetail() {
                   </div>
                 ) : subcourseCandidates.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-                    Nenhum curso disponível para vincular.
+                    Nenhum curso disponível para importar.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1029,7 +1052,7 @@ export function CourseDetail() {
                           className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
                         >
                           {attachingCourseId === candidate.id && <Loader2 className="w-4 h-4 animate-spin" />}
-                          Vincular
+                          Importar cópia limpa
                         </button>
                       </div>
                     ))}

@@ -4,6 +4,7 @@ import fs from 'fs';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware } from '../middleware/auth.js';
 import { upload, UPLOAD_DIR } from '../middleware/upload.js';
+import { cloneClassTemplate } from '../lib/courseTemplateClone.js';
 
 const router = Router();
 
@@ -451,80 +452,20 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
   try {
     await client.query('BEGIN');
 
-    // 1. Busca aula original
-    const orig = await client.query('SELECT * FROM classes WHERE id = $1', [req.params.id]);
-    if (orig.rows.length === 0) {
+    const targetAccess = await userCanAccessCourse(course_id, req.user!.id, req.user!.system_role);
+    if (!targetAccess) {
       await client.query('ROLLBACK');
-      res.status(404).json({ error: 'Aula original não encontrada' });
+      res.status(404).json({ error: 'Curso de destino não encontrado' });
       return;
     }
-    const original = orig.rows[0];
 
-    // 2. Cria nova aula
-    const { rows: [newClass] } = await client.query(
-      `INSERT INTO classes (course_id, title, description, date, status, qr_duration_minutes, owner_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, presentation_url, online_content_type, video_url, video_provider, video_id, video_duration_seconds)
-       VALUES ($1, $2, $3, $4, 'scheduled', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
-      [
-        course_id,
-        title?.trim() || original.title,
-        description?.trim() || original.description || '',
-        date || null,
-        original.qr_duration_minutes || 10,
-        req.user!.id,
-        original.points_start ?? 40,
-        original.points_middle ?? 30,
-        original.points_end ?? 30,
-        original.type || 'presential',
-        original.expected_duration_minutes,
-        original.slide_minimum_seconds,
-        original.presentation_url,
-        original.online_content_type || 'slides',
-        original.video_url,
-        original.video_provider,
-        original.video_id,
-        original.video_duration_seconds,
-      ]
-    );
-
-    // 3. Copia avaliações
-    const { rows: origEvals } = await client.query(
-      'SELECT * FROM evaluations WHERE class_id = $1',
-      [original.id]
-    );
-
-    for (const ev of origEvals) {
-      const { rows: [newEval] } = await client.query(
-        `INSERT INTO evaluations (class_id, title, question_time, status, type)
-         VALUES ($1, $2, $3, 'draft', $4) RETURNING *`,
-        [newClass.id, ev.title, ev.question_time, ev.type || 'presential']
-      );
-
-      const { rows: origQuestions } = await client.query(
-        'SELECT * FROM questions WHERE evaluation_id = $1 ORDER BY order_index',
-        [ev.id]
-      );
-
-      for (const q of origQuestions) {
-        const { rows: [newQ] } = await client.query(
-          `INSERT INTO questions (evaluation_id, text, order_index, points)
-           VALUES ($1, $2, $3, $4) RETURNING *`,
-          [newEval.id, q.text, q.order_index, q.points ?? 10]
-        );
-
-        const { rows: origAlts } = await client.query(
-          'SELECT * FROM alternatives WHERE question_id = $1 ORDER BY order_index',
-          [q.id]
-        );
-
-        for (const alt of origAlts) {
-          await client.query(
-            `INSERT INTO alternatives (question_id, text, is_correct, order_index)
-             VALUES ($1, $2, $3, $4)`,
-            [newQ.id, alt.text, alt.is_correct, alt.order_index]
-          );
-        }
-      }
-    }
+    const newClass = await cloneClassTemplate(client, Number(req.params.id), {
+      courseId: Number(course_id),
+      ownerId: req.user!.id,
+      title,
+      description,
+      date: date || null,
+    });
 
     await client.query('COMMIT');
     res.status(201).json(newClass);

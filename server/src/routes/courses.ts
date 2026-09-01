@@ -4,6 +4,7 @@ import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware, JWT_SECRET } from '../middleware/auth.js';
 import { normalizeIdentifier } from '../lib/identifier.js';
 import jwt from 'jsonwebtoken';
+import { cloneCourseTemplate } from '../lib/courseTemplateClone.js';
 
 const router = Router();
 
@@ -322,6 +323,13 @@ router.get('/:id/subcourse-candidates', authMiddleware, isCourseCreatorMiddlewar
        ) class_stats ON TRUE
        WHERE c.id <> target.id
          AND NOT (c.parent_course_id = target.id AND c.is_subcourse = TRUE)
+         AND NOT EXISTS (
+           SELECT 1
+           FROM courses imported
+           WHERE imported.parent_course_id = target.id
+             AND imported.is_subcourse = TRUE
+             AND imported.source_course_id = c.id
+         )
        ORDER BY c.is_subcourse, c.created_at DESC`,
       [req.params.id]
     );
@@ -332,7 +340,7 @@ router.get('/:id/subcourse-candidates', authMiddleware, isCourseCreatorMiddlewar
   }
 });
 
-// POST /api/courses/:id/attach-subcourse — Vincular curso existente como subcurso
+// POST /api/courses/:id/attach-subcourse — Importar uma cópia limpa como subcurso
 router.post('/:id/attach-subcourse', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
   const { subcourse_id } = req.body;
   if (!subcourse_id || Number(subcourse_id) === Number(req.params.id)) {
@@ -352,11 +360,11 @@ router.post('/:id/attach-subcourse', authMiddleware, isCourseCreatorMiddleware, 
     }
 
     const { rows: [parent] } = await client.query(
-      'SELECT id, title, is_subcourse FROM courses WHERE id = $1 FOR UPDATE',
+      'SELECT id, title, owner_id, is_subcourse FROM courses WHERE id = $1 FOR UPDATE',
       [req.params.id]
     );
     const { rows: [child] } = await client.query(
-      'SELECT id, title, parent_course_id, is_subcourse FROM courses WHERE id = $1 FOR UPDATE',
+      'SELECT id, title FROM courses WHERE id = $1',
       [subcourse_id]
     );
 
@@ -371,34 +379,12 @@ router.post('/:id/attach-subcourse', authMiddleware, isCourseCreatorMiddleware, 
       return;
     }
 
-    const { rows: descendants } = await client.query(
-      `WITH RECURSIVE descendants AS (
-         SELECT id FROM courses WHERE parent_course_id = $1 AND is_subcourse = TRUE
-         UNION ALL
-         SELECT c.id
-         FROM courses c
-         JOIN descendants d ON c.parent_course_id = d.id
-         WHERE c.is_subcourse = TRUE
-       )
-       SELECT id FROM descendants WHERE id = $2`,
-      [subcourse_id, req.params.id]
-    );
-    if (descendants.length > 0) {
-      await client.query('ROLLBACK');
-      res.status(400).json({ error: 'Não é possível vincular um curso ao próprio descendente' });
-      return;
-    }
-
-    const { rows: [updated] } = await client.query(
-      `UPDATE courses
-       SET parent_course_id = $1,
-           is_subcourse = TRUE,
-           enrollment_open = FALSE,
-           updated_at = NOW()
-       WHERE id = $2
-       RETURNING *`,
-      [req.params.id, subcourse_id]
-    );
+    const cleanCopy = await cloneCourseTemplate(client, Number(subcourse_id), {
+      ownerId: parent.owner_id || req.user!.id,
+      parentCourseId: Number(parent.id),
+      isSubcourse: true,
+      enrollmentOpen: false,
+    });
 
     const { rows: parentTeachers } = await client.query(
       'SELECT teacher_id FROM course_teachers WHERE course_id = $1',
@@ -407,18 +393,54 @@ router.post('/:id/attach-subcourse', authMiddleware, isCourseCreatorMiddleware, 
     for (const teacher of parentTeachers) {
       await client.query(
         'INSERT INTO course_teachers (course_id, teacher_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [subcourse_id, teacher.teacher_id]
+        [cleanCopy.id, teacher.teacher_id]
       );
     }
 
     await client.query('COMMIT');
-    res.json({ message: 'Curso vinculado como subcurso com sucesso', subcourse: updated });
+    res.status(201).json({
+      message: 'Cópia limpa importada como subcurso com sucesso',
+      subcourse: cleanCopy,
+      source_course_id: Number(subcourse_id),
+    });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Attach subcourse error:', err);
-    res.status(500).json({ error: 'Erro ao vincular subcurso' });
+    console.error('Import clean subcourse error:', err);
+    res.status(500).json({ error: 'Erro ao importar cópia limpa do curso' });
   } finally {
     client.release();
+  }
+});
+
+// DELETE /api/courses/:id/subcourses/:subcourseId — Desvincular sem apagar histórico
+router.delete('/:id/subcourses/:subcourseId', authMiddleware, isCourseCreatorMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const canAccess = await userCanAccessCourse(req.params.id, req.user!.id, req.user!.system_role);
+    if (!canAccess) {
+      res.status(404).json({ error: 'Curso principal não encontrado' });
+      return;
+    }
+
+    const { rows: [detached] } = await pool.query(
+      `UPDATE courses
+       SET parent_course_id = NULL,
+           is_subcourse = FALSE,
+           updated_at = NOW()
+       WHERE id = $1
+         AND parent_course_id = $2
+         AND is_subcourse = TRUE
+       RETURNING *`,
+      [req.params.subcourseId, req.params.id]
+    );
+    if (!detached) {
+      res.status(404).json({ error: 'Subcurso não encontrado neste curso principal' });
+      return;
+    }
+
+    res.json({ message: 'Subcurso desvinculado sem alterar seu histórico', course: detached });
+  } catch (err) {
+    console.error('Detach subcourse error:', err);
+    res.status(500).json({ error: 'Erro ao desvincular subcurso' });
   }
 });
 
@@ -915,31 +937,27 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
   try {
     await client.query('BEGIN');
 
-    // 1. Busca curso original
-    const orig = await client.query('SELECT * FROM courses WHERE id = $1', [req.params.id]);
-    if (orig.rows.length === 0) {
+    const { rows: [original] } = await client.query(
+      'SELECT * FROM courses WHERE id = $1',
+      [req.params.id]
+    );
+    if (!original) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'Curso original não encontrado' });
       return;
     }
-    const original = orig.rows[0];
 
-    // 2. Cria novo curso
-    const { rows: [newCourse] } = await client.query(
-      `INSERT INTO courses (title, description, duration_hours, owner_id, certificate_config, start_date, end_date, parent_course_id, enrollment_open)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [
-        title.trim(),
-        description?.trim() || original.description || '',
-        duration_hours || original.duration_hours || 0,
-        req.user!.id,
-        original.certificate_config,
-        start_date || null,
-        end_date || null,
-        original.id,
-        typeof enrollment_open === 'boolean' ? enrollment_open : original.enrollment_open !== false,
-      ]
-    );
+    const newCourse = await cloneCourseTemplate(client, Number(req.params.id), {
+      ownerId: req.user!.id,
+      title: title.trim(),
+      description,
+      durationHours: duration_hours,
+      startDate: start_date || null,
+      endDate: end_date || null,
+      parentCourseId: null,
+      isSubcourse: false,
+      enrollmentOpen: typeof enrollment_open === 'boolean' ? enrollment_open : original.enrollment_open !== false,
+    });
 
     // 3. Copia professores adicionais
     const { rows: origTeachers } = await client.query(
@@ -951,66 +969,6 @@ router.post('/:id/reuse', authMiddleware, isCourseCreatorMiddleware, async (req:
         'INSERT INTO course_teachers (course_id, teacher_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [newCourse.id, t.teacher_id]
       );
-    }
-
-    // 4. Copia aulas
-    const { rows: origClasses } = await client.query(
-      'SELECT * FROM classes WHERE course_id = $1 ORDER BY created_at',
-      [original.id]
-    );
-
-    for (const c of origClasses) {
-      const { rows: [newClass] } = await client.query(
-        `INSERT INTO classes (course_id, title, description, status, qr_duration_minutes, owner_id, points_start, points_middle, points_end, type, expected_duration_minutes, slide_minimum_seconds, presentation_url)
-         VALUES ($1, $2, $3, 'scheduled', $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-        [
-          newCourse.id, c.title, c.description, c.qr_duration_minutes || 10,
-          req.user!.id, c.points_start ?? 40, c.points_middle ?? 30, c.points_end ?? 30,
-          c.type || 'presential', c.expected_duration_minutes, c.slide_minimum_seconds,
-          c.presentation_url,
-        ]
-      );
-
-      // 5. Copia avaliações da aula
-      const { rows: origEvals } = await client.query(
-        'SELECT * FROM evaluations WHERE class_id = $1',
-        [c.id]
-      );
-
-      for (const ev of origEvals) {
-        const { rows: [newEval] } = await client.query(
-          `INSERT INTO evaluations (class_id, title, question_time, status, type)
-           VALUES ($1, $2, $3, 'draft', $4) RETURNING *`,
-          [newClass.id, ev.title, ev.question_time, ev.type || 'presential']
-        );
-
-        // 6. Copia questões e alternativas
-        const { rows: origQuestions } = await client.query(
-          'SELECT * FROM questions WHERE evaluation_id = $1 ORDER BY order_index',
-          [ev.id]
-        );
-
-        for (const q of origQuestions) {
-          const { rows: [newQ] } = await client.query(
-            `INSERT INTO questions (evaluation_id, text, order_index, points)
-             VALUES ($1, $2, $3, $4) RETURNING *`,
-            [newEval.id, q.text, q.order_index, q.points ?? 10]
-          );
-
-          const { rows: origAlts } = await client.query(
-            'SELECT * FROM alternatives WHERE question_id = $1 ORDER BY order_index',
-            [q.id]
-          );
-
-          for (const alt of origAlts) {
-            await client.query(
-              `INSERT INTO alternatives (question_id, text, is_correct, order_index)
-               VALUES ($1, $2, $3, $4)`,
-              [newQ.id, alt.text, alt.is_correct, alt.order_index]
-            );
-          }
-        }
-      }
     }
 
     await client.query('COMMIT');

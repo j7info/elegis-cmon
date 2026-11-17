@@ -8,9 +8,9 @@ const VALID_PROFILES = new Set<SystemProfile>([
 ]);
 
 export function getAvailableProfiles(systemRole: string | null | undefined): SystemProfile[] {
-  if (systemRole === 'PROFESSOR') return ['PROFESSOR', 'ALUNO'];
   if (systemRole && VALID_PROFILES.has(systemRole as SystemProfile)) {
-    return [systemRole as SystemProfile];
+    const role = systemRole as SystemProfile;
+    return role === 'ALUNO' ? ['ALUNO'] : [role, 'ALUNO'];
   }
   return ['ALUNO'];
 }

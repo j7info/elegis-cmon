@@ -42,8 +42,8 @@ interface AdminUser extends AdminUserSummaryInput {
 }
 
 const roleLabels: Record<string, string> = {
-  ADMIN: 'Administrador',
-  COORDENADOR: 'Coordenação',
+  ADMIN: 'Administrador e aluno',
+  COORDENADOR: 'Coordenação e aluno',
   PROFESSOR: 'Professor e aluno',
   ALUNO: 'Aluno',
 };
@@ -519,7 +519,7 @@ export function AdminSettings() {
                 <LabeledInput label="Cargo" value={editingUser.cargo || ''} onChange={value => setEditingUser({ ...editingUser, cargo: value })} />
                 <LabeledInput label="Função de confiança" value={editingUser.funcao_confianca || ''} onChange={value => setEditingUser({ ...editingUser, funcao_confianca: value })} />
                 <LabeledInput label="Departamento" value={editingUser.departamento || ''} onChange={value => setEditingUser({ ...editingUser, departamento: value })} />
-                <label className="block"><span className="mb-1.5 block text-sm font-semibold text-slate-700">Papel no sistema</span><select value={editingUser.system_role || 'ALUNO'} onChange={event => setEditingUser({ ...editingUser, system_role: event.target.value })} className={inputClass}><option value="ALUNO">Aluno</option><option value="PROFESSOR">Professor (também acessa como aluno)</option><option value="COORDENADOR">Coordenação</option><option value="ADMIN">Administrador</option></select></label>
+                <label className="block"><span className="mb-1.5 block text-sm font-semibold text-slate-700">Papel no sistema</span><select value={editingUser.system_role || 'ALUNO'} onChange={event => setEditingUser({ ...editingUser, system_role: event.target.value })} className={inputClass}><option value="ALUNO">Aluno</option><option value="PROFESSOR">Professor (também acessa como aluno)</option><option value="COORDENADOR">Coordenação (também acessa como aluno)</option><option value="ADMIN">Administrador (também acessa como aluno)</option></select></label>
                 <label className="block"><span className="mb-1.5 block text-sm font-semibold text-slate-700">Situação</span><select value={editingUser.status || 'Ativo'} onChange={event => setEditingUser({ ...editingUser, status: event.target.value })} className={inputClass}><option value="Ativo">Ativo</option><option value="Inativo">Inativo</option></select></label>
               </div>
               <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">

@@ -16,6 +16,7 @@ import clsx from 'clsx';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useSettings } from '../lib/useSettings';
+import { canAlternateStaffStudent } from '../lib/profileModel';
 
 const roleLabels = {
   ADMIN: 'Administrador',
@@ -82,12 +83,11 @@ export function AdminLayout() {
   };
 
   const isStudent = activeProfile === 'ALUNO';
-  const canAlternateProfile = Boolean(
-    user?.available_profiles.includes('PROFESSOR')
-    && user.available_profiles.includes('ALUNO'),
-  );
+  const canAlternateProfile = Boolean(user && canAlternateStaffStudent(user.available_profiles));
+  const staffModeLabel = user ? roleLabels[user.system_role].toLowerCase() : '';
   const alternateProfile = () => {
-    switchProfile(isStudent ? 'PROFESSOR' : 'ALUNO');
+    if (!user) return;
+    switchProfile(isStudent ? user.system_role : 'ALUNO');
     navigate('/');
   };
   const navItems = user
@@ -169,7 +169,7 @@ export function AdminLayout() {
                   className="mb-2 flex min-h-10 w-full items-center gap-3 rounded-md bg-teal-50 px-3 text-left text-sm font-semibold text-teal-800 transition-colors hover:bg-teal-100"
                 >
                   <ArrowLeftRight className="h-4 w-4 shrink-0" />
-                  {isStudent ? 'Voltar ao modo professor' : 'Acessar como aluno'}
+                  {isStudent ? `Voltar ao modo ${staffModeLabel}` : 'Acessar como aluno'}
                 </button>
               )}
               <button
@@ -191,11 +191,11 @@ export function AdminLayout() {
                   type="button"
                   onClick={alternateProfile}
                   className="flex h-10 items-center justify-center gap-2 rounded-md px-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
-                  title={isStudent ? 'Voltar ao modo professor' : 'Acessar como aluno'}
-                  aria-label={isStudent ? 'Voltar ao modo professor' : 'Acessar como aluno'}
+                  title={isStudent ? `Voltar ao modo ${staffModeLabel}` : 'Acessar como aluno'}
+                  aria-label={isStudent ? `Voltar ao modo ${staffModeLabel}` : 'Acessar como aluno'}
                 >
                   <ArrowLeftRight className="h-5 w-5" />
-                  <span className="hidden sm:inline">{isStudent ? 'Professor' : 'Aluno'}</span>
+                  <span className="hidden sm:inline">{isStudent ? roleLabels[user.system_role] : 'Aluno'}</span>
                 </button>
               )}
               <button

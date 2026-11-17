@@ -8,7 +8,7 @@ const VALID_PROFILES = new Set<SystemProfile>([
 ]);
 
 export function profilesForRole(systemRole: SystemProfile): SystemProfile[] {
-  return systemRole === 'PROFESSOR' ? ['PROFESSOR', 'ALUNO'] : [systemRole];
+  return systemRole === 'ALUNO' ? ['ALUNO'] : [systemRole, 'ALUNO'];
 }
 
 export function normalizeAvailableProfiles(
@@ -38,6 +38,6 @@ export function resolveActiveProfile(
   return availableProfiles[0] || systemRole;
 }
 
-export function canAlternateTeacherStudent(profiles: SystemProfile[]): boolean {
-  return profiles.includes('PROFESSOR') && profiles.includes('ALUNO');
+export function canAlternateStaffStudent(profiles: SystemProfile[]): boolean {
+  return profiles.includes('ALUNO') && profiles.some(profile => profile !== 'ALUNO');
 }

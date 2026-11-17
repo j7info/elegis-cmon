@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import redis from '../db/redis.js';
+import { getAvailableProfiles, type SystemProfile } from '../lib/userProfiles.js';
 
 const DEFAULT_JWT_SECRET = 'elegiscmon-dev-secret-change-in-production';
 const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
@@ -18,6 +19,7 @@ export interface AuthUser {
   cargo: string | null;
   departamento: string | null;
   system_role: string;
+  available_profiles: SystemProfile[];
 }
 
 export interface AuthRequest extends Request {
@@ -26,7 +28,13 @@ export interface AuthRequest extends Request {
 
 export function generateToken(user: AuthUser): string {
   return jwt.sign(
-    { id: user.id, matricula: user.matricula, name: user.name, system_role: user.system_role },
+    {
+      id: user.id,
+      matricula: user.matricula,
+      name: user.name,
+      system_role: user.system_role,
+      available_profiles: user.available_profiles,
+    },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN as any }
   );
@@ -66,6 +74,7 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
       cargo: decoded.cargo || null,
       departamento: decoded.departamento || null,
       system_role: decoded.system_role || 'ALUNO',
+      available_profiles: getAvailableProfiles(decoded.system_role),
     };
 
     // Cache session for 5 minutes

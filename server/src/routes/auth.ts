@@ -6,6 +6,7 @@ import { authLimiter } from '../middleware/rateLimit.js';
 import crypto from 'crypto';
 import { MailRateLimitError, sendRecoveryEmail } from '../lib/mailer.js';
 import { getAppBaseUrl } from '../lib/security.js';
+import { getAvailableProfiles } from '../lib/userProfiles.js';
 
 const router = Router();
 
@@ -50,6 +51,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       cargo: user.cargo,
       departamento: user.departamento,
       system_role: user.system_role,
+      available_profiles: getAvailableProfiles(user.system_role),
     };
 
     const token = generateToken(tokenUser);
@@ -127,7 +129,10 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    res.json(rows[0]);
+    res.json({
+      ...rows[0],
+      available_profiles: getAvailableProfiles(rows[0].system_role),
+    });
   } catch (err) {
     console.error('Get me error:', err);
     res.status(500).json({ error: 'Erro ao buscar dados do usuário' });

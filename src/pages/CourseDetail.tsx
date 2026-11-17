@@ -17,7 +17,7 @@ function formatDateOnly(value: string | null | undefined) {
 
 export function CourseDetail() {
   const { courseId } = useParams();
-  const { user } = useAuth();
+  const { user, activeProfile } = useAuth();
   const navigate = useNavigate();
   const [courseData, setCourseData] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -68,7 +68,7 @@ export function CourseDetail() {
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [attachingCourseId, setAttachingCourseId] = useState<number | null>(null);
 
-  const isStudent = user?.system_role === 'ALUNO';
+  const isStudent = activeProfile === 'ALUNO';
 
   const selectNewClassType = (type: 'presential' | 'practical' | 'online' | 'interactive' | 'video') => {
     if (type === 'practical') {
@@ -143,7 +143,7 @@ export function CourseDetail() {
 
   useEffect(() => {
     loadData();
-  }, [courseId]);
+  }, [courseId, activeProfile]);
 
   useEffect(() => {
     if (!isStudent) return;

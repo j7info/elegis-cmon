@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
+  ArrowLeftRight,
   BarChart3,
   GraduationCap,
   Home,
@@ -24,7 +25,7 @@ const roleLabels = {
 };
 
 export function AdminLayout() {
-  const { user, login, logout, loading, error, clearError } = useAuth();
+  const { user, activeProfile, switchProfile, login, logout, loading, error, clearError } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
@@ -80,7 +81,15 @@ export function AdminLayout() {
     }
   };
 
-  const isStudent = user?.system_role === 'ALUNO';
+  const isStudent = activeProfile === 'ALUNO';
+  const canAlternateProfile = Boolean(
+    user?.available_profiles.includes('PROFESSOR')
+    && user.available_profiles.includes('ALUNO'),
+  );
+  const alternateProfile = () => {
+    switchProfile(isStudent ? 'PROFESSOR' : 'ALUNO');
+    navigate('/');
+  };
   const navItems = user
     ? [
         { to: '/', label: 'Início', icon: Home, exact: true },
@@ -151,8 +160,18 @@ export function AdminLayout() {
             <div className="border-t border-slate-100 p-4">
               <div className="mb-3 min-w-0 px-2">
                 <p className="truncate text-sm font-semibold text-slate-900">{user.name}</p>
-                <p className="text-xs text-slate-500">{roleLabels[user.system_role]}</p>
+                <p className="text-xs text-slate-500">Modo {roleLabels[activeProfile || user.system_role]}</p>
               </div>
+              {canAlternateProfile && (
+                <button
+                  type="button"
+                  onClick={alternateProfile}
+                  className="mb-2 flex min-h-10 w-full items-center gap-3 rounded-md bg-teal-50 px-3 text-left text-sm font-semibold text-teal-800 transition-colors hover:bg-teal-100"
+                >
+                  <ArrowLeftRight className="h-4 w-4 shrink-0" />
+                  {isStudent ? 'Voltar ao modo professor' : 'Acessar como aluno'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={logout}
@@ -166,15 +185,29 @@ export function AdminLayout() {
 
           <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:hidden">
             <Brand compact />
-            <button
-              type="button"
-              onClick={logout}
-              className="flex h-10 w-10 items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700"
-              title="Sair"
-              aria-label="Sair"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {canAlternateProfile && (
+                <button
+                  type="button"
+                  onClick={alternateProfile}
+                  className="flex h-10 items-center justify-center gap-2 rounded-md px-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+                  title={isStudent ? 'Voltar ao modo professor' : 'Acessar como aluno'}
+                  aria-label={isStudent ? 'Voltar ao modo professor' : 'Acessar como aluno'}
+                >
+                  <ArrowLeftRight className="h-5 w-5" />
+                  <span className="hidden sm:inline">{isStudent ? 'Professor' : 'Aluno'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={logout}
+                className="flex h-10 w-10 items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700"
+                title="Sair"
+                aria-label="Sair"
+              >
+                <LogOut className="h-5 w-5" />
+              </button>
+            </div>
           </header>
 
           <main className="min-h-screen px-4 pb-24 pt-6 sm:px-6 lg:ml-64 lg:px-8 lg:pb-10 lg:pt-8">

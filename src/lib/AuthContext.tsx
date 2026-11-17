@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api } from './api';
+import {
+  normalizeAvailableProfiles,
+  resolveActiveProfile,
+  type SystemProfile,
+} from './profileModel';
 
 export interface AuthUser {
   id: number;
@@ -13,33 +18,57 @@ export interface AuthUser {
   orgao: string | null;
   status: string;
   must_change_password: boolean;
-  system_role: 'ADMIN' | 'COORDENADOR' | 'PROFESSOR' | 'ALUNO';
+  system_role: SystemProfile;
+  available_profiles: SystemProfile[];
 }
 
 interface AuthContextType {
   user: AuthUser | null;
+  activeProfile: SystemProfile | null;
   loading: boolean;
   login: (matricula: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  switchProfile: (profile: SystemProfile) => void;
   error: string | null;
   clearError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
+  activeProfile: null,
   loading: true,
   login: async () => {},
   logout: async () => {},
   changePassword: async () => {},
+  switchProfile: () => {},
   error: null,
   clearError: () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [activeProfile, setActiveProfile] = useState<SystemProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const applyAuthenticatedUser = (rawUser: AuthUser) => {
+    const normalizedUser: AuthUser = {
+      ...rawUser,
+      available_profiles: normalizeAvailableProfiles(rawUser.system_role, rawUser.available_profiles),
+    };
+    const profileStorageKey = `auth_active_profile:${normalizedUser.id}`;
+    const nextProfile = resolveActiveProfile(
+      normalizedUser.system_role,
+      normalizedUser.available_profiles,
+      localStorage.getItem(profileStorageKey),
+    );
+
+    setUser(normalizedUser);
+    setActiveProfile(nextProfile);
+    localStorage.setItem('auth_user', JSON.stringify(normalizedUser));
+    localStorage.setItem(profileStorageKey, nextProfile);
+  };
 
   // Restore session on mount
   useEffect(() => {
@@ -48,18 +77,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (token && savedUser) {
       try {
-        setUser(JSON.parse(savedUser));
+        applyAuthenticatedUser(JSON.parse(savedUser));
         // Validate token with backend
         api.get('/auth/me')
-          .then((data) => {
-            setUser(data);
-            localStorage.setItem('auth_user', JSON.stringify(data));
-          })
+          .then(applyAuthenticatedUser)
           .catch(() => {
             // Token invalid
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_user');
             setUser(null);
+            setActiveProfile(null);
           })
           .finally(() => setLoading(false));
       } catch {
@@ -77,8 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api.post('/auth/login', { matricula, password });
       localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('auth_user', JSON.stringify(data.user));
-      setUser(data.user);
+      applyAuthenticatedUser(data.user);
     } catch (err: any) {
       const msg = err.message || 'Erro ao fazer login';
       setError(msg);
@@ -95,6 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
     setUser(null);
+    setActiveProfile(null);
   };
 
   const changePassword = async (currentPassword: string, newPassword: string) => {
@@ -112,8 +139,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const clearError = () => setError(null);
 
+  const switchProfile = (profile: SystemProfile) => {
+    if (!user?.available_profiles.includes(profile)) return;
+    setActiveProfile(profile);
+    localStorage.setItem(`auth_active_profile:${user.id}`, profile);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, changePassword, error, clearError }}>
+    <AuthContext.Provider value={{ user, activeProfile, loading, login, logout, changePassword, switchProfile, error, clearError }}>
       {children}
     </AuthContext.Provider>
   );

@@ -14,7 +14,7 @@ const canCreateCourse = (u: AuthUser | null) =>
   u?.system_role === 'ADMIN' || u?.system_role === 'COORDENADOR' || u?.system_role === 'PROFESSOR';
 
 export function Dashboard() {
-  const { user, loading } = useAuth();
+  const { user, activeProfile, loading } = useAuth();
   const [courses, setCourses] = useState<CourseRecord[]>([]);
   const [performance, setPerformance] = useState<CoursePerformanceSummary[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
@@ -39,8 +39,11 @@ export function Dashboard() {
     if (!user) return;
     setDataLoading(true);
     setLoadError(null);
+    setCourses([]);
+    setPerformance([]);
+    setAllUsers([]);
     try {
-      if (user.system_role === 'ALUNO') {
+      if (activeProfile === 'ALUNO') {
         const [coursesResult, performanceResult] = await Promise.allSettled([
           api.get<CourseRecord[]>('/courses/enrolled'),
           api.get<{ courses: CoursePerformanceSummary[] }>('/me/performance'),
@@ -76,7 +79,7 @@ export function Dashboard() {
   useEffect(() => {
     if (!user) return;
     loadData();
-  }, [user]);
+  }, [user, activeProfile]);
 
   const closeModal = () => {
     setIsModalOpen(false);
@@ -178,7 +181,7 @@ export function Dashboard() {
     );
   }
 
-  const isAluno = user.system_role === 'ALUNO';
+  const isAluno = activeProfile === 'ALUNO';
 
   return (
     <div className="space-y-8">

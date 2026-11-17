@@ -5,6 +5,7 @@ import { authMiddleware, AuthRequest, isAdmin, isCourseCreatorMiddleware, JWT_SE
 import { normalizeIdentifier } from '../lib/identifier.js';
 import jwt from 'jsonwebtoken';
 import { cloneCourseTemplate } from '../lib/courseTemplateClone.js';
+import { getEnrollmentBlock } from '../lib/courseEnrollment.js';
 
 const router = Router();
 
@@ -129,6 +130,18 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
          LIMIT 1
        ) r ON TRUE
        LEFT JOIN LATERAL (
+         SELECT EXISTS (
+           SELECT 1
+           FROM courses managed_course
+           LEFT JOIN course_teachers managed_teacher ON managed_teacher.course_id = managed_course.id
+           WHERE (
+               managed_course.id = c.id
+               OR (managed_course.parent_course_id = c.id AND managed_course.is_subcourse = TRUE)
+             )
+             AND (managed_course.owner_id = $1 OR managed_teacher.teacher_id = $1)
+         ) AS is_managed
+       ) managed ON TRUE
+       LEFT JOIN LATERAL (
          WITH pending_classes AS (
            SELECT cl.id, cl.title, cl.date, cl.type, cl.online_content_type, cl.status
            FROM classes cl
@@ -184,7 +197,10 @@ router.get('/enrolled', authMiddleware, async (req: AuthRequest, res: Response) 
          FROM pending_classes
        ) pending ON r.id IS NOT NULL
        WHERE c.is_subcourse = FALSE
-         AND (r.id IS NOT NULL OR c.enrollment_open = TRUE)
+         AND (
+           r.id IS NOT NULL
+           OR (c.enrollment_open = TRUE AND managed.is_managed = FALSE)
+         )
        ORDER BY c.created_at DESC`,
       [req.user!.id]
     );
@@ -824,15 +840,25 @@ router.get('/:id/enrollment-link', authMiddleware, async (req: AuthRequest, res:
 router.post('/:id/enroll', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { rows: courses } = await pool.query(
-      'SELECT id, enrollment_open FROM courses WHERE id = $1',
-      [req.params.id]
+      `SELECT c.id, c.enrollment_open,
+         EXISTS (
+           SELECT 1
+           FROM courses managed_course
+           LEFT JOIN course_teachers managed_teacher ON managed_teacher.course_id = managed_course.id
+           WHERE (
+               managed_course.id = c.id
+               OR managed_course.id = c.parent_course_id
+               OR (managed_course.parent_course_id = c.id AND managed_course.is_subcourse = TRUE)
+             )
+             AND (managed_course.owner_id = $2 OR managed_teacher.teacher_id = $2)
+         ) AS managed_by_user
+       FROM courses c
+       WHERE c.id = $1`,
+      [req.params.id, req.user!.id]
     );
-    if (courses.length === 0) {
-      res.status(404).json({ error: 'Curso não encontrado' });
-      return;
-    }
-    if (!courses[0].enrollment_open) {
-      res.status(403).json({ error: 'Inscrições indisponíveis para este curso' });
+    const enrollmentBlock = getEnrollmentBlock(courses[0]);
+    if (enrollmentBlock) {
+      res.status(enrollmentBlock.status).json({ error: enrollmentBlock.error });
       return;
     }
 

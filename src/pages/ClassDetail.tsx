@@ -633,7 +633,7 @@ export function ClassDetail() {
     registrations.map(registration => String(registration.full_name || '').trim().toLocaleLowerCase('pt-BR')).filter(Boolean)
   );
   allUsers
-    .filter(person => person.system_role === 'ALUNO')
+    .filter(person => person.system_role === 'ALUNO' || person.system_role === 'PROFESSOR')
     .forEach(person => {
       const identifier = String(person.cpf || person.email || person.matricula || '');
       const normalizedName = String(person.name || '').trim().toLocaleLowerCase('pt-BR');

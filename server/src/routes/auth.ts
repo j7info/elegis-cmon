@@ -4,7 +4,7 @@ import pool from '../db/pool.js';
 import { generateToken, blacklistToken, authMiddleware, AuthRequest } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import crypto from 'crypto';
-import { sendRecoveryEmail } from '../lib/mailer.js';
+import { MailRateLimitError, sendRecoveryEmail } from '../lib/mailer.js';
 import { getAppBaseUrl } from '../lib/security.js';
 
 const router = Router();
@@ -178,6 +178,11 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
     
     res.json({ message: 'E-mail de recuperação enviado com sucesso.' });
   } catch (err) {
+    if (err instanceof MailRateLimitError) {
+      res.setHeader('Retry-After', err.retryAfterSeconds);
+      res.status(429).json({ error: 'Limite temporário de e-mails atingido. Tente novamente em instantes.' });
+      return;
+    }
     console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Erro ao processar solicitação' });
   }

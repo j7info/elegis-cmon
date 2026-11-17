@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import pool from '../db/pool.js';
 import { authMiddleware, AuthRequest, isAdminMiddleware } from '../middleware/auth.js';
 import crypto from 'crypto';
-import { sendRecoveryEmail } from '../lib/mailer.js';
+import { MailRateLimitError, sendRecoveryEmail } from '../lib/mailer.js';
 import { getAppBaseUrl } from '../lib/security.js';
 import { normalizeIdentifier } from '../lib/identifier.js';
 
@@ -310,11 +310,16 @@ router.post('/:id/reset-password', authMiddleware, isAdminMiddleware, async (req
       [token, expires, user.id]
     );
     
-    const baseUrl = process.env.FRONTEND_URL || req.headers.origin || 'http://localhost:5173';
+    const baseUrl = getAppBaseUrl(req);
     await sendRecoveryEmail(user.email, token, baseUrl);
 
     res.json({ message: 'E-mail de recuperação enviado com sucesso para o usuário.' });
   } catch (err) {
+    if (err instanceof MailRateLimitError) {
+      res.setHeader('Retry-After', err.retryAfterSeconds);
+      res.status(429).json({ error: 'Limite temporário de e-mails atingido. Tente novamente em instantes.' });
+      return;
+    }
     console.error('Reset password email error:', err);
     res.status(500).json({ error: 'Erro ao enviar e-mail de recuperação' });
   }

@@ -9,7 +9,15 @@ type MailEnvironment = Partial<Pick<NodeJS.ProcessEnv,
   | 'MAIL_FROM_NAME'
   | 'MAIL_SECURE'
   | 'MAIL_TLS_REJECT_UNAUTHORIZED'
+  | 'MAIL_RATE_LIMIT_PER_MINUTE'
 >>;
+
+export class MailRateLimitError extends Error {
+  constructor(public readonly retryAfterSeconds: number) {
+    super('Limite de envio de e-mails atingido');
+    this.name = 'MailRateLimitError';
+  }
+}
 
 export const resolveMailConfig = (env: MailEnvironment = process.env) => {
   const host = env.MAIL_HOST?.trim();
@@ -25,6 +33,11 @@ export const resolveMailConfig = (env: MailEnvironment = process.env) => {
     throw new Error('MAIL_PORT inválida');
   }
 
+  const rateLimitPerMinute = Number.parseInt(env.MAIL_RATE_LIMIT_PER_MINUTE || '3', 10);
+  if (!Number.isInteger(rateLimitPerMinute) || rateLimitPerMinute < 1 || rateLimitPerMinute > 60) {
+    throw new Error('MAIL_RATE_LIMIT_PER_MINUTE inválida');
+  }
+
   return {
     transport: {
       host,
@@ -37,11 +50,18 @@ export const resolveMailConfig = (env: MailEnvironment = process.env) => {
     },
     fromAddress: env.MAIL_FROM_ADDRESS?.trim() || user,
     fromName: env.MAIL_FROM_NAME?.trim() || 'Elegis - Câmara Municipal de Ourilândia do Norte',
+    rateLimitPerMinute,
   };
 };
 
 export const sendRecoveryEmail = async (to: string, token: string, baseUrl: string) => {
   const config = resolveMailConfig();
+  const { reserveMailQuota } = await import('./mailRateLimit.js');
+  const quota = await reserveMailQuota(config.rateLimitPerMinute);
+  if (!quota.allowed) {
+    throw new MailRateLimitError(quota.retryAfterSeconds);
+  }
+
   const transporter = nodemailer.createTransport(config.transport);
   const resetLink = `${baseUrl}/reset-password?token=${token}`;
   

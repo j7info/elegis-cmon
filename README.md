@@ -41,12 +41,19 @@ Abra o arquivo `.env.prod` e configure as senhas fortes de banco de dados e as s
 
 ```ini
 # --- BANCO DE DADOS ---
-POSTGRES_USER=elegiscmon
-POSTGRES_PASSWORD=SUA_SENHA_FORTE
-POSTGRES_DB=elegiscmon
+DB_USER=elegiscmon
+DB_PASSWORD=SUA_SENHA_FORTE
+DB_NAME=elegiscmon
+
+# --- REDIS ---
+REDIS_PASSWORD=OUTRA_SENHA_FORTE_E_EXCLUSIVA
 
 # --- JWT (SEGURANÇA) ---
 JWT_SECRET=UM_TEXTO_MUITO_GRANDE_E_ALEATORIO
+
+# --- APLICAÇÃO ---
+PUBLIC_APP_URL=https://elegis.ourilandiadonorte.pa.leg.br
+CORS_ORIGIN=https://elegis.ourilandiadonorte.pa.leg.br
 
 # --- E-MAIL ---
 MAIL_HOST=mail.ourilandiadonorte.pa.leg.br
@@ -57,6 +64,7 @@ MAIL_FROM_ADDRESS=notificacoes@ourilandiadonorte.pa.leg.br
 MAIL_FROM_NAME="Elegis - Câmara Municipal de Ourilândia do Norte"
 MAIL_SECURE=false
 MAIL_TLS_REJECT_UNAUTHORIZED=true
+MAIL_RATE_LIMIT_PER_MINUTE=3
 ```
 
 ### 3. Subindo os Contêineres

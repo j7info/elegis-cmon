@@ -13,7 +13,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "${DB_EXTERNAL_PORT:-5432}:5432"
+      - "127.0.0.1:${DB_EXTERNAL_PORT:-5432}:5432"
     command: >
       postgres
         -c max_connections=200
@@ -44,8 +44,14 @@ services:
     image: redis:7-alpine
     container_name: elegiscmon-redis
     restart: unless-stopped
-    command: >
-      redis-server
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatoria em producao}
+    command:
+      - /bin/sh
+      - -c
+      - >
+        exec redis-server
+        --requirepass "$$REDIS_PASSWORD"
         --maxmemory 256mb
         --maxmemory-policy allkeys-lru
         --appendonly yes
@@ -53,9 +59,9 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_EXTERNAL_PORT:-6379}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -86,26 +92,28 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD obrigatorio em producao}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatoria em producao}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET obrigatorio em producao}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
-      CORS_ORIGIN: ${CORS_ORIGIN:-}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN obrigatoria em producao}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL obrigatoria em producao}
       BODY_LIMIT: ${BODY_LIMIT:-2mb}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
       UPLOAD_DIR: /app/uploads
-      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_HOST: ${MAIL_HOST:?MAIL_HOST obrigatoria em producao}
       MAIL_PORT: ${MAIL_PORT:-587}
-      MAIL_USERNAME: ${MAIL_USERNAME:-}
-      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+      MAIL_USERNAME: ${MAIL_USERNAME:?MAIL_USERNAME obrigatoria em producao}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:?MAIL_PASSWORD obrigatoria em producao}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:?MAIL_FROM_ADDRESS obrigatoria em producao}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Elegis - Câmara Municipal de Ourilândia do Norte}
       MAIL_SECURE: ${MAIL_SECURE:-false}
       MAIL_TLS_REJECT_UNAUTHORIZED: ${MAIL_TLS_REJECT_UNAUTHORIZED:-true}
+      MAIL_RATE_LIMIT_PER_MINUTE: ${MAIL_RATE_LIMIT_PER_MINUTE:-3}
     volumes:
       - uploads:/app/uploads
       - ./docs:/app/docs:ro
     ports:
-      - "${BACKEND_EXTERNAL_PORT:-3001}:3001"
+      - "127.0.0.1:${BACKEND_EXTERNAL_PORT:-3001}:3001"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
       interval: 30s

@@ -27,6 +27,7 @@ test('mantém TLS validado por padrão e usa o remetente configurado', () => {
   assert.equal(config.transport.tls.rejectUnauthorized, true);
   assert.equal(config.fromAddress, 'sistema@example.test');
   assert.equal(config.fromName, 'Elegis Teste');
+  assert.equal(config.rateLimitPerMinute, 3);
 });
 
 test('ativa conexão segura automaticamente na porta 465', () => {
@@ -50,5 +51,28 @@ test('recusa porta de e-mail inválida', () => {
       MAIL_PASSWORD: 'test-only-password',
     }),
     /MAIL_PORT inválida/,
+  );
+});
+
+test('aceita limite de envio configurado pelo provedor', () => {
+  const config = resolveMailConfig({
+    MAIL_HOST: 'smtp.example.test',
+    MAIL_USERNAME: 'notificacoes@example.test',
+    MAIL_PASSWORD: 'test-only-password',
+    MAIL_RATE_LIMIT_PER_MINUTE: '3',
+  });
+
+  assert.equal(config.rateLimitPerMinute, 3);
+});
+
+test('recusa limite de envio fora da faixa segura', () => {
+  assert.throws(
+    () => resolveMailConfig({
+      MAIL_HOST: 'smtp.example.test',
+      MAIL_USERNAME: 'notificacoes@example.test',
+      MAIL_PASSWORD: 'test-only-password',
+      MAIL_RATE_LIMIT_PER_MINUTE: '0',
+    }),
+    /MAIL_RATE_LIMIT_PER_MINUTE inválida/,
   );
 });

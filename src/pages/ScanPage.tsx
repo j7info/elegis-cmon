@@ -1,71 +1,98 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import clsx from 'clsx';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Clock3,
+  IdCard,
+  Loader2,
+  RefreshCw,
+  UserPlus,
+} from 'lucide-react';
+import { PublicFlowShell } from '../components/PublicFlowShell';
 import { api } from '../lib/api';
 import { normalizeIdentifier } from '../lib/identifier';
-import { CheckCircle2, AtSign, Loader2, AlertTriangle, UserPlus } from 'lucide-react';
+import {
+  buildScanReturnPath,
+  evaluateAttendanceWindow,
+  getAttendanceStepLabel,
+  getAttendanceSteps,
+  type AttendanceWindowState,
+} from '../lib/publicAttendanceModel';
+
+interface PublicClassData {
+  id: number;
+  course_id: number;
+  title: string;
+  status: string;
+  type?: string | null;
+  qr_duration_minutes?: number | null;
+  qr_start_at?: number | string | null;
+  qr_middle_at?: number | string | null;
+  qr_end_at?: number | string | null;
+}
 
 export function ScanPage() {
   const { classId, step } = useParams();
   const navigate = useNavigate();
-  const [classData, setClassData] = useState<any>(null);
+  const [classData, setClassData] = useState<PublicClassData | null>(null);
+  const [windowState, setWindowState] = useState<AttendanceWindowState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [needsEnrollment, setNeedsEnrollment] = useState(false);
   const [enrollmentCourseId, setEnrollmentCourseId] = useState('');
-  
+  const [reloadToken, setReloadToken] = useState(0);
+
   useEffect(() => {
-    async function loadClass() {
-      if (!classId || !step) return;
+    const loadClass = async () => {
+      if (!classId || !step) {
+        setError('O endereço desta presença está incompleto.');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError('');
       try {
-        const data = await api.get(`/classes/${classId}`);
-        if (data.status !== 'active') {
-          setError('Esta aula não está ativa no momento.');
-        } else {
-          const qrColumn = `qr_${step}_at`;
-          const activeAt = data[qrColumn];
-          const durationMinutes = data.qr_duration_minutes || 10;
-          
-          if (!activeAt) {
-            setError('O registro de presença para essa etapa ainda não foi ativado pelo professor.');
-          } else if (Date.now() > Number(activeAt) + (durationMinutes * 60 * 1000)) {
-            setError('O tempo para registro no QR Code desta etapa esgotou.');
-          } else {
-            setClassData(data);
-          }
-        }
-      } catch (err) {
-        setError('Erro ao carregar detalhes da aula.');
+        const data = await api.get<PublicClassData>(`/classes/${classId}`);
+        const state = evaluateAttendanceWindow(data, step);
+        setClassData(data);
+        setWindowState(state);
+        if (state.state !== 'open') setError(state.message);
+      } catch (requestError: any) {
+        setError(requestError.message || 'Não foi possível carregar os dados da aula.');
       } finally {
         setLoading(false);
       }
-    }
-    loadClass();
-  }, [classId, step]);
+    };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!classId || !step || !identifier || !classData) return;
-    
+    loadClass();
+  }, [classId, step, reloadToken]);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!classId || !step || !identifier.trim() || !classData || windowState?.state !== 'open') return;
+
     setLoading(true);
     setError('');
-    
     try {
-      const result = await api.post(`/classes/${classId}/scan/${step}`, {
+      const result = await api.post<{ message?: string; full_name?: string }>(`/classes/${classId}/scan/${step}`, {
         identifier: identifier.trim(),
       });
-      
       setSuccess(result.message || `${result.full_name}, sua presença foi confirmada!`);
-    } catch (err: any) {
-      if (err.message === 'USER_NOT_FOUND') {
-        // Redireciona para o pré-cadastro com o CPF e a URL de retorno
-        navigate(`/pre-register?identifier=${encodeURIComponent(normalizeIdentifier(identifier))}&returnUrl=${encodeURIComponent(window.location.pathname)}`);
-      } else if (err.message === 'NOT_ENROLLED') {
+    } catch (requestError: any) {
+      if (requestError.message === 'USER_NOT_FOUND') {
+        const returnPath = buildScanReturnPath(classId, step);
+        navigate(`/pre-register?identifier=${encodeURIComponent(normalizeIdentifier(identifier))}&returnUrl=${encodeURIComponent(returnPath)}`);
+      } else if (requestError.message === 'NOT_ENROLLED') {
         setNeedsEnrollment(true);
-        setEnrollmentCourseId(err.course_id || classData?.course_id);
+        setEnrollmentCourseId(String(requestError.response?.data?.course_id || classData.course_id || ''));
       } else {
-        setError(err.message || 'Erro ao marcar presença. Tente novamente.');
+        setError(requestError.message || 'Não foi possível registrar a presença. Tente novamente.');
       }
     } finally {
       setLoading(false);
@@ -74,103 +101,118 @@ export function ScanPage() {
 
   const handleEnrollAndScan = async () => {
     const cleanIdentifier = identifier.trim();
-    if (!enrollmentCourseId || !cleanIdentifier) return;
+    if (!enrollmentCourseId || !cleanIdentifier || !classId || !step) return;
+
     setLoading(true);
+    setError('');
     try {
-      // 1. Inscreve no curso
       await api.post(`/courses/${enrollmentCourseId}/enroll`, { identifier: cleanIdentifier });
-      // 2. Tenta registrar presença novamente
-      const result = await api.post(`/classes/${classId}/scan/${step}`, { identifier: cleanIdentifier });
-      
+      const result = await api.post<{ message?: string; full_name?: string }>(`/classes/${classId}/scan/${step}`, { identifier: cleanIdentifier });
       setNeedsEnrollment(false);
       setSuccess(result.message || `${result.full_name}, sua inscrição e presença foram confirmadas!`);
-    } catch (err: any) {
-      setError(err.message || 'Erro ao tentar se inscrever. Tente novamente.');
+    } catch (requestError: any) {
+      setError(requestError.message || 'Não foi possível concluir a inscrição.');
       setNeedsEnrollment(false);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!classData && !error) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500"><Loader2 className="w-8 h-8 animate-spin" /></div>;
-  }
+  const stepLabel = getAttendanceStepLabel(step);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 font-sans">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
-        <div className="bg-teal-600 px-6 py-8 text-center text-white">
-          <h1 className="text-xl font-medium opacity-90 tracking-wide uppercase text-sm mb-2">Marcação de Presença</h1>
-          <h2 className="text-2xl font-bold">{classData?.title || 'Aula'}</h2>
-          <div className="mt-4 inline-block bg-white/20 px-3 py-1 rounded-full text-sm font-semibold tracking-wide">
-            ETAPA: {step === 'start' ? 'ENTRADA' : step === 'middle' ? 'MEIO DA AULA' : 'SAÍDA'}
-          </div>
-        </div>
-        
-        <div className="p-8">
-          {needsEnrollment ? (
-            <div className="text-center">
-              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <UserPlus className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Inscrição Necessária</h3>
-              <p className="text-gray-600 mb-6">Você ainda não está inscrito neste curso. Deseja se inscrever agora e confirmar sua presença na aula?</p>
-              <div className="space-y-3">
-                <button onClick={handleEnrollAndScan} disabled={loading} className="w-full px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium shadow-md transition-colors flex justify-center items-center gap-2">
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Confirmar Inscrição e Presença'}
-                </button>
-                <button onClick={() => setNeedsEnrollment(false)} disabled={loading} className="w-full px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors">
-                  Cancelar
-                </button>
-              </div>
+    <PublicFlowShell
+      eyebrow="Registro de presença"
+      title={classData?.title || 'Aula presencial'}
+      description={classData ? `${stepLabel} · janela de ${classData.qr_duration_minutes || 10} minutos` : 'Validando esta janela de presença.'}
+    >
+      {classData && <AttendanceProgress type={classData.type} currentStep={step} />}
+
+      <div className="p-5 sm:p-7">
+        {loading && !classData ? (
+          <div className="flex min-h-56 items-center justify-center text-sm text-slate-500"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Verificando presença...</div>
+        ) : needsEnrollment ? (
+          <StateMessage
+            icon={UserPlus}
+            tone="info"
+            title="Inscrição necessária"
+            message="Seu cadastro foi localizado, mas ainda falta o vínculo com este curso. Confirme para registrar também esta presença."
+          >
+            <button type="button" onClick={handleEnrollAndScan} disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50">
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />} Confirmar inscrição e presença
+            </button>
+            <button type="button" onClick={() => setNeedsEnrollment(false)} disabled={loading} className="h-10 w-full text-sm font-semibold text-slate-600 hover:text-slate-950">Voltar</button>
+          </StateMessage>
+        ) : success ? (
+          <StateMessage icon={CheckCircle2} tone="success" title="Presença confirmada" message={success}>
+            <p className="text-xs text-slate-500">Você já pode fechar esta página.</p>
+          </StateMessage>
+        ) : error ? (
+          <StateMessage icon={AlertTriangle} tone="danger" title={windowState?.state === 'expired' ? 'Janela encerrada' : 'Não foi possível continuar'} message={error}>
+            <button type="button" onClick={() => setReloadToken(current => current + 1)} disabled={loading} className="flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <RefreshCw className={clsx('h-4 w-4', loading && 'animate-spin')} /> Atualizar situação
+            </button>
+          </StateMessage>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700"><Clock3 className="h-5 w-5" /></span>
+              <div><p className="text-sm font-semibold text-slate-950">Janela aberta</p><p className="text-xs text-slate-500">Etapa: {stepLabel}</p></div>
             </div>
-          ) : error ? (
-            <div className="text-center">
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="w-8 h-8" />
-              </div>
-              <p className="text-red-700 font-medium mb-6">{error}</p>
-              <button onClick={() => { setError(''); setIdentifier(''); }} className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors">
-                Tentar Novamente
-              </button>
-            </div>
-          ) : success ? (
-            <div className="text-center">
-              <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-4" />
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">Confirmado!</h3>
-              <p className="text-gray-600">{success}</p>
-              <p className="text-sm font-medium text-gray-400 mt-6">Aguardando no dispositivo seguro...</p>
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="text-center mb-6">
-                <p className="text-gray-600 font-medium">Digite o CPF ou Email utilizado no seu cadastro prévio da aula.</p>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
-                    <AtSign className="w-6 h-6" />
-                  </div>
-                  <input 
-                    type="text" 
-                    placeholder="Seu CPF ou Email" 
-                    value={identifier} 
-                    onChange={e => setIdentifier(e.target.value)} 
-                    required 
-                    className="w-full text-lg pl-14 pr-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 outline-none transition-all shadow-sm font-medium" 
-                  />
-                </div>
-              </div>
-              
-              <button type="submit" disabled={loading || !identifier.trim()} className="w-full flex items-center justify-center gap-2 py-4 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-lg shadow-md transition-colors disabled:opacity-50 mt-6">
-                {loading && <Loader2 className="w-5 h-5 animate-spin" />}
-                Registrar Presença
-              </button>
-            </form>
-          )}
-        </div>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold text-slate-700">CPF, e-mail ou matrícula</span>
+              <span className="relative block">
+                <IdCard className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" />
+                <input
+                  type="text"
+                  autoComplete="username"
+                  inputMode="text"
+                  value={identifier}
+                  onChange={event => setIdentifier(event.target.value)}
+                  placeholder="Digite sua identificação"
+                  required
+                  className="h-12 w-full rounded-md border border-slate-300 pl-11 pr-4 text-base outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                />
+              </span>
+            </label>
+
+            <p className="text-xs leading-5 text-slate-500">Use a mesma identificação vinculada ao seu cadastro na plataforma.</p>
+
+            <button type="submit" disabled={loading || !identifier.trim()} className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-teal-700 px-4 font-semibold text-white hover:bg-teal-800 disabled:opacity-50">
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />} Registrar presença
+            </button>
+          </form>
+        )}
       </div>
+    </PublicFlowShell>
+  );
+}
+
+function AttendanceProgress({ type, currentStep }: { type?: string | null; currentStep?: string }) {
+  const steps = getAttendanceSteps(type);
+  return (
+    <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+      {steps.map((item, index) => {
+        const active = item === currentStep;
+        return (
+          <div key={item} className={clsx('flex min-w-0 items-center justify-center gap-2 border-r border-slate-200 px-2 py-3 text-xs font-semibold last:border-r-0', active ? 'bg-teal-50 text-teal-800' : 'text-slate-400')}>
+            <span className={clsx('flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]', active ? 'bg-teal-700 text-white' : 'bg-slate-200 text-slate-600')}>{index + 1}</span>
+            <span className="truncate">{getAttendanceStepLabel(item)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StateMessage({ icon: Icon, tone, title, message, children }: { icon: React.ElementType; tone: 'success' | 'danger' | 'info'; title: string; message: string; children: React.ReactNode }) {
+  return (
+    <div className="py-3 text-center">
+      <span className={clsx('mx-auto flex h-16 w-16 items-center justify-center rounded-full', tone === 'success' ? 'bg-emerald-50 text-emerald-700' : tone === 'danger' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700')}><Icon className="h-8 w-8" /></span>
+      <h2 className="mt-4 text-xl font-bold text-slate-950">{title}</h2>
+      <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-600">{message}</p>
+      <div className="mx-auto mt-6 max-w-sm space-y-2">{children}</div>
     </div>
   );
 }

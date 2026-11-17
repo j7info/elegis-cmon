@@ -4,8 +4,16 @@ import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { maskIdentifier } from '../lib/format';
 import { format } from 'date-fns';
-import { ArrowLeft, Calendar, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video, BookOpen, Unlink } from 'lucide-react';
+import { Activity, ArrowLeft, Calendar, CalendarClock, FileText, Download, Users, CheckCircle2, ChevronRight, X, Edit3, Trash2, Award, Copy, BarChart, User, Loader2, Plus, FileUp, Video, BookOpen, Unlink } from 'lucide-react';
 import clsx from 'clsx';
+import { StudentCourseView } from '../components/course/StudentCourseView';
+import { summarizeCourseOperation } from '../lib/courseManagementModel';
+
+function formatDateOnly(value: string | null | undefined) {
+  if (!value) return '';
+  const [year, month, day] = value.slice(0, 10).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : value;
+}
 
 export function CourseDetail() {
   const { courseId } = useParams();
@@ -15,7 +23,9 @@ export function CourseDetail() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [classes, setClasses] = useState<any[]>([]);
   const [subcourses, setSubcourses] = useState<any[]>([]);
+  const [studentPerformanceCourses, setStudentPerformanceCourses] = useState<any[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+  const [showCreateClassForm, setShowCreateClassForm] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [auxiliaryTeacherId, setAuxiliaryTeacherId] = useState('');
@@ -79,11 +89,19 @@ export function CourseDetail() {
     setLoadError(null);
     try {
       const course = await api.get(`/courses/${courseId}`);
-      const promises: Promise<any>[] = [
-        api.get(`/classes/course/${courseId}`)
-      ];
+      const classesPath = isStudent
+        ? `/classes/course/${courseId}?scope=tree`
+        : `/classes/course/${courseId}`;
+      const promises: Promise<any>[] = [api.get(classesPath)];
 
-      if (!isStudent) {
+      if (isStudent) {
+        promises.push(
+          api.get('/me/performance').catch((error) => {
+            console.warn('Could not load student performance for course view', error);
+            return { courses: [] };
+          }),
+        );
+      } else {
         promises.push(api.get(`/certificates/report/${courseId}`));
         promises.push(api.get('/users'));
       }
@@ -103,7 +121,9 @@ export function CourseDetail() {
         setSubcourses([]);
       }
       
-      if (!isStudent) {
+      if (isStudent) {
+        setStudentPerformanceCourses(results[1]?.courses || []);
+      } else {
         setStudentsReport(results[1]?.students || []);
         setAllUsers(results[2] || []);
         
@@ -235,6 +255,7 @@ export function CourseDetail() {
       setPointsStart('40');
       setPointsMiddle('30');
       setPointsEnd('30');
+      setShowCreateClassForm(false);
       await loadData();
     } catch (error) {
       console.error('Create class error:', error);
@@ -332,23 +353,42 @@ export function CourseDetail() {
     );
   }
 
+  if (isStudent) {
+    return (
+      <StudentCourseView
+        course={courseData}
+        classes={classes}
+        subcourses={subcourses}
+        performanceCourses={studentPerformanceCourses}
+        getActiveAttendanceStep={getActiveAttendanceStep}
+        selfScanLoading={selfScanLoading}
+        feedback={selfScanFeedback}
+        onRegisterAttendance={handleSelfAttendance}
+      />
+    );
+  }
+
+  const operationSummary = summarizeCourseOperation(classes, pendingRegistrations, studentsReport, subcourses);
+
   return (
     <div className="space-y-6">
       <Link to="/" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-teal-600 transition-colors">
         <ArrowLeft className="w-4 h-4" /> Voltar aos Cursos
       </Link>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{courseData.title}</h1>
-          <div className="flex items-center gap-4 mt-2 flex-wrap">
-            <span className="text-sm font-medium text-teal-600 bg-teal-50 px-2 py-1 rounded">
-              Carga horária: {courseData.duration_hours || 0}h
-            </span>
+      <header className="rounded-md border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase text-teal-700">Gestão do curso</p>
+            <h1 className="mt-1 text-2xl font-bold text-slate-950 sm:text-3xl">{courseData.title}</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="text-sm font-semibold text-teal-700">
+                {courseData.duration_hours || 0} horas
+              </span>
             {courseData.start_date && (
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-slate-500">
                 <Calendar className="w-3.5 h-3.5 inline mr-1" />
-                {format(new Date(courseData.start_date), 'dd/MM/yyyy')} — {courseData.end_date ? format(new Date(courseData.end_date), 'dd/MM/yyyy') : '...'}
+                {formatDateOnly(courseData.start_date)} — {courseData.end_date ? formatDateOnly(courseData.end_date) : '...'}
               </span>
             )}
             {courseData.is_subcourse && (
@@ -357,39 +397,42 @@ export function CourseDetail() {
             {!courseData.is_subcourse && subcourses.length > 0 && (
               <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{subcourses.length} subcurso{subcourses.length === 1 ? '' : 's'}</span>
             )}
-            {!isStudent && (
               <span className={clsx(
-                "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                courseData.enrollment_open !== false ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
-              )}>
-                {courseData.enrollment_open !== false ? 'Inscrições abertas' : 'Inscrições fechadas'}
-              </span>
-            )}
+                'rounded-full px-2 py-1 text-[10px] font-bold uppercase',
+                courseData.enrollment_open !== false ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600',
+              )}>{courseData.enrollment_open !== false ? 'Inscrições abertas' : 'Inscrições fechadas'}</span>
+            </div>
+            {courseData.description && <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">{courseData.description}</p>}
           </div>
-          {courseData.description && <p className="text-gray-500 mt-3">{courseData.description}</p>}
-        </div>
-        {!isStudent && (
-          <div className="flex gap-2 flex-wrap mt-4 md:mt-0">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCreateClassForm(current => !current)}
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white hover:bg-teal-800"
+            >
+              {showCreateClassForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {showCreateClassForm ? 'Fechar criação' : 'Nova aula'}
+            </button>
             <button
               onClick={() => {
                 setEditTitle(courseData.title);
                 setEditDescription(courseData.description || '');
                 setEditDuration(String(courseData.duration_hours || 0));
-                setEditStartDate(courseData.start_date ? format(new Date(courseData.start_date), 'yyyy-MM-dd') : '');
-                setEditEndDate(courseData.end_date ? format(new Date(courseData.end_date), 'yyyy-MM-dd') : '');
+                setEditStartDate(courseData.start_date?.slice(0, 10) || '');
+                setEditEndDate(courseData.end_date?.slice(0, 10) || '');
                 setEditEnrollmentOpen(courseData.enrollment_open !== false);
                 setShowEditCourse(true);
               }}
-              className="px-4 py-2 bg-gray-50 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors border border-gray-200 flex items-center gap-2 whitespace-nowrap text-sm"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <Edit3 className="w-4 h-4" /> Editar Curso
+              <Edit3 className="h-4 w-4" /> Editar
             </button>
             {!courseData.is_subcourse && (
               <button
                 onClick={openSubcourseModal}
-                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium transition-colors border border-indigo-100 flex items-center gap-2 whitespace-nowrap text-sm"
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-4 text-sm font-semibold text-indigo-800 hover:bg-indigo-100"
               >
-                <BookOpen className="w-4 h-4" /> Subcursos / Migrar Cursos
+                <BookOpen className="h-4 w-4" /> Subcursos
               </button>
             )}
             <button
@@ -399,28 +442,45 @@ export function CourseDetail() {
                 setReuseEndDate('');
                 setShowReuseModal(true);
               }}
-              className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <Copy className="w-4 h-4" /> Reutilizar Curso
+              <Copy className="h-4 w-4" /> Reutilizar
             </button>
             <Link 
               to={`/course/${courseData.is_subcourse ? courseData.parent_course_id : courseId}/certificates`}
-              className="px-4 py-2 bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg font-medium transition-colors border border-teal-100 flex items-center gap-2 whitespace-nowrap text-sm"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <Award className="w-4 h-4" /> Certificados
+              <Award className="h-4 w-4" /> Certificados
             </Link>
           </div>
-        )}
-      </div>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white xl:grid-cols-4" aria-label="Resumo operacional do curso">
+        {[
+          { label: 'Aulas', value: operationSummary.totalClasses, icon: BookOpen, color: 'text-teal-700' },
+          { label: 'Em andamento', value: operationSummary.activeClasses, icon: Activity, color: 'text-emerald-700' },
+          { label: 'Agendadas', value: operationSummary.scheduledClasses, icon: CalendarClock, color: 'text-blue-700' },
+          { label: operationSummary.pendingStudents > 0 ? 'Alunos pendentes' : 'Alunos', value: operationSummary.pendingStudents > 0 ? operationSummary.pendingStudents : operationSummary.students, icon: Users, color: operationSummary.pendingStudents > 0 ? 'text-amber-700' : 'text-slate-700' },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <div key={label} className="flex min-w-0 items-center gap-3 border-b border-slate-100 p-4 odd:border-r [&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:p-5 xl:last:border-r-0">
+            <Icon className={clsx('h-5 w-5', color)} />
+            <div><p className="text-2xl font-bold text-slate-950">{value}</p><p className="text-xs font-medium text-slate-500">{label}</p></div>
+          </div>
+        ))}
+      </section>
 
       <div className="grid md:grid-cols-3 gap-8">
         <div className={clsx("space-y-6", isStudent ? "md:col-span-3" : "md:col-span-2")}>
           {!courseData.is_subcourse && subcourses.length > 0 && (
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <section className="space-y-4">
               <div className="flex items-center justify-between gap-3 mb-4">
-                <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 text-indigo-600" /> Subcursos
-                </h2>
+                <div>
+                  <p className="text-xs font-bold uppercase text-indigo-700">Estrutura</p>
+                  <h2 className="mt-1 flex items-center gap-2 text-xl font-bold text-slate-950">
+                    <BookOpen className="h-5 w-5 text-indigo-600" /> Subcursos
+                  </h2>
+                </div>
                 {!isStudent && (
                   <button
                     type="button"
@@ -433,7 +493,7 @@ export function CourseDetail() {
               </div>
               <div className="grid gap-3">
                 {subcourses.map(sc => (
-                  <div key={sc.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors group">
+                  <div key={sc.id} className="group flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-indigo-300">
                     <div className="min-w-0">
                       <Link to={`/course/${sc.id}`} className="font-semibold text-gray-900 group-hover:text-indigo-700 truncate block">{sc.title}</Link>
                       <p className="text-xs text-gray-500 mt-1">
@@ -454,12 +514,20 @@ export function CourseDetail() {
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          {!isStudent && (
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">{courseData.is_subcourse ? 'Nova Aula do Subcurso' : 'Nova Aula do Curso'}</h2>
+          {showCreateClassForm && (
+            <div className="rounded-md border border-teal-200 bg-white p-6 shadow-sm">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase text-teal-700">Planejamento</p>
+                  <h2 className="mt-1 text-lg font-bold text-slate-950">{courseData.is_subcourse ? 'Nova aula do subcurso' : 'Nova aula do curso'}</h2>
+                </div>
+                <button type="button" onClick={() => setShowCreateClassForm(false)} className="flex h-9 w-9 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Fechar criação de aula">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               <form onSubmit={handleCreateClass} className="space-y-4">
                 <input 
                   type="text" 
@@ -710,9 +778,18 @@ export function CourseDetail() {
           )}
 
           <div className="space-y-4">
-            <h2 className="text-lg font-medium text-gray-900">Aulas</h2>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase text-teal-700">Programação</p>
+                <h2 className="mt-1 text-xl font-bold text-slate-950">Aulas do curso</h2>
+                <p className="mt-1 text-sm text-slate-500">Abra uma aula para gerenciar presença, conteúdo e avaliação.</p>
+              </div>
+              <button type="button" onClick={() => setShowCreateClassForm(true)} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-4 text-sm font-semibold text-teal-800 hover:bg-teal-100">
+                <Plus className="h-4 w-4" /> Nova aula
+              </button>
+            </div>
             {classes.length === 0 ? (
-              <div className="text-center p-8 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500">
+              <div className="rounded-md border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
                 Ainda não há aulas cadastradas neste curso.
               </div>
             ) : (
@@ -721,7 +798,10 @@ export function CourseDetail() {
                   const activeAttendanceStep = getActiveAttendanceStep(c);
                   const feedback = selfScanFeedback[c.id];
                   return (
-                  <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:border-teal-300 hover:shadow-md transition-all flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between group">
+                  <div key={c.id} className={clsx(
+                    'group flex flex-col gap-3 rounded-md border bg-white p-4 shadow-sm transition-all hover:border-teal-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between',
+                    c.status === 'active' ? 'border-emerald-200' : 'border-slate-200',
+                  )}>
                     {isStudent ? (
                       <div className="flex-1 min-w-0">
                         {c.type === 'online' || c.is_interactive ? (
@@ -763,9 +843,21 @@ export function CourseDetail() {
                       </div>
                     ) : (
                       <Link to={`/class/${c.id}`} className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900 group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                          <Calendar className="w-3 h-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                        <div className="flex items-center gap-3">
+                          <span className={clsx(
+                            'flex h-10 w-10 shrink-0 items-center justify-center rounded-md',
+                            c.type === 'online' ? 'bg-blue-50 text-blue-700' : c.type === 'practical' ? 'bg-emerald-50 text-emerald-700' : 'bg-teal-50 text-teal-700',
+                          )}>
+                            {c.type === 'online' ? <Video className="h-5 w-5" /> : <Calendar className="h-5 w-5" />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block font-semibold text-slate-950 transition-colors group-hover:text-teal-700">{c.title}</span>
+                            <span className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+                              <Calendar className="h-3 w-3" /> {c.date ? format(new Date(c.date), "dd/MM/yyyy 'às' HH:mm") : '-'}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="ml-[3.25rem] mt-2 flex items-center gap-2 text-xs text-gray-500">
                           {c.type === 'online' && (
                             <span className={clsx(
                               'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
@@ -830,10 +922,10 @@ export function CourseDetail() {
                             <Copy className="w-3.5 h-3.5" />
                           </button>
                           <Link to={`/class/${c.id}`}>
-                            <span className={clsx("text-xs font-medium px-2 py-1 rounded-full", {
+                            <span className={clsx("rounded-full px-2 py-1 text-[10px] font-bold uppercase", {
                               "bg-yellow-100 text-yellow-800": c.status === 'scheduled',
                               "bg-green-100 text-green-800": c.status === 'active',
-                              "bg-gray-100 text-gray-800": c.status === 'completed',
+                              "bg-slate-100 text-slate-700": c.status === 'completed',
                             })}>
                               {c.status === 'scheduled' ? 'Agendado' : c.status === 'active' ? 'Em andamento' : 'Concluído'}
                             </span>
@@ -852,14 +944,14 @@ export function CourseDetail() {
         {!isStudent && (
           <div className="md:col-span-1 space-y-6">
             {pendingRegistrations.length > 0 && (
-              <div className="bg-amber-50 p-6 rounded-xl shadow-sm border border-amber-200">
+              <section className="rounded-md border border-amber-200 bg-amber-50 p-5 shadow-sm">
                 <div className="flex items-center gap-2 mb-4">
                   <User className="w-5 h-5 text-amber-600" />
-                  <h2 className="text-lg font-medium text-amber-900">Alunos Pendentes ({pendingRegistrations.length})</h2>
+                  <h2 className="text-lg font-bold text-amber-950">Alunos pendentes ({pendingRegistrations.length})</h2>
                 </div>
                 <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
                   {pendingRegistrations.map((reg) => (
-                    <div key={reg.id} className="p-3 bg-white rounded-lg border border-amber-100 shadow-sm text-sm">
+                    <div key={reg.id} className="rounded-md border border-amber-100 bg-white p-3 text-sm shadow-sm">
                       <div className="font-medium text-gray-900">{reg.full_name}</div>
                       <div className="text-xs text-gray-500 mb-2">{reg.identifier} • {reg.department}</div>
                       <button
@@ -882,13 +974,13 @@ export function CourseDetail() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
             )}
 
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 sticky top-24">
+            <section className="sticky top-24 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4">
                 <BarChart className="w-5 h-5 text-teal-600" />
-                <h2 className="text-lg font-medium text-gray-900">Desempenho Geral</h2>
+                <h2 className="text-lg font-bold text-slate-950">Desempenho geral</h2>
               </div>
               
               <p className="text-sm text-gray-500 mb-4">
@@ -903,7 +995,7 @@ export function CourseDetail() {
               ) : (
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
                   {studentsReport.map((s: any) => (
-                    <div key={s.identifier} className="flex flex-col gap-1 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <div key={s.identifier} className="flex flex-col gap-1 rounded-md border border-slate-100 bg-slate-50 p-3">
                         <div className="flex justify-between items-start">
                           <span className="font-medium text-sm text-gray-900 line-clamp-1">{s.full_name}</span>
                           <span className={clsx("text-xs font-bold px-2 py-0.5 rounded", s.approved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
@@ -919,7 +1011,7 @@ export function CourseDetail() {
                   ))}
                 </div>
               )}
-            </div>
+            </section>
           </div>
         )}
 

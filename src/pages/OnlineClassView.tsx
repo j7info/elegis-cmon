@@ -5,6 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { ChevronLeft, ChevronRight, Clock, CheckCircle2, BarChart, BookOpen, LogIn, Loader2, HelpCircle, Award, RotateCcw, Play, Pause, Video } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../lib/AuthContext';
+import { canAdvanceSlide, getLessonProgressPercentage, getSlideAccessState } from '../lib/onlineLessonModel';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -82,8 +83,15 @@ export function OnlineClassView() {
   const minRequired = classData?.slide_minimum_seconds ?? 30;
   const isVideoClass = classData?.online_content_type === 'video';
   const unlockedSlideCount = Number(progress?.current_slide || 0);
-  const isHistoricalSlide = unlockedSlideCount > 0 && currentSlide < unlockedSlideCount;
-  const canAdvance = isHistoricalSlide || (elapsed >= minRequired && !advancing);
+  const slideAccessState = getSlideAccessState({
+    currentSlide,
+    unlockedSlideCount,
+    elapsedSeconds: elapsed,
+    minimumSeconds: minRequired,
+    completed: Boolean(progress?.completed_at),
+  });
+  const isHistoricalSlide = slideAccessState === 'reviewed' || slideAccessState === 'completed';
+  const canAdvance = canAdvanceSlide(slideAccessState, advancing);
 
   // Timer: update elapsed time every second
   useEffect(() => {
@@ -921,56 +929,42 @@ export function OnlineClassView() {
   }
 
   // Slide viewer
-  const slidePct = totalSlides > 0 ? Math.round(((currentSlide) / totalSlides) * 100) : 0;
+  const slidePct = getLessonProgressPercentage(unlockedSlideCount, totalSlides);
+  const unlockedForDisplay = Math.min(unlockedSlideCount, totalSlides);
+  const slideStatusLabel = slideAccessState === 'completed'
+    ? 'Concluída'
+    : slideAccessState === 'reviewed'
+      ? 'Revisão livre'
+      : slideAccessState === 'ready'
+        ? 'Pronto para avançar'
+        : `Libera em ${formatTime(Math.max(0, minRequired - elapsed))}`;
 
   return (
     <main key="viewing" className="min-h-screen bg-gray-900 flex flex-col">
       {/* Top bar */}
-      <header className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <BookOpen className="w-5 h-5 text-teal-400" />
-          <span className="text-sm font-medium text-gray-200 truncate max-w-[300px]">
+      <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-gray-700 bg-gray-800 px-3 py-3 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <button onClick={() => navigate(-1)} className="flex h-9 w-9 flex-none items-center justify-center rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white" title="Sair da aula" aria-label="Sair da aula">
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <BookOpen className="hidden h-5 w-5 flex-none text-teal-400 sm:block" />
+          <span className="max-w-[300px] truncate text-sm font-medium text-gray-200">
             {classData?.title || 'Aula Online'}
           </span>
         </div>
-        <div className="flex items-center gap-4">
-          {/* Timer / elapsed */}
-          <div className="flex items-center gap-2">
-            {progress?.completed_at ? (
-              <span className="text-xs text-green-400 font-bold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Concluído
-              </span>
-            ) : isHistoricalSlide ? (
-              <span className="text-xs text-teal-400 font-bold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Lido
-              </span>
-            ) : (
-              <>
-                <Clock className="w-4 h-4 text-gray-400" />
-                <span className={clsx(
-                  'text-sm font-mono font-bold',
-                  elapsed < minRequired ? 'text-amber-400' : 'text-green-400'
-                )}>
-                  {formatTime(elapsed)}
-                </span>
-                {elapsed < minRequired && (
-                  <span className="text-xs text-amber-500">
-                    ({formatTime(minRequired - elapsed)})
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Progress */}
-          <div className="text-xs text-gray-400">
-            {currentSlide + 1} / {totalSlides}
-          </div>
+        <div className="flex flex-none items-center gap-2 sm:gap-3">
+          <span className={clsx(
+            'hidden rounded-full px-2.5 py-1 text-xs font-semibold sm:inline-flex',
+            slideAccessState === 'waiting' ? 'bg-amber-400/10 text-amber-300' : 'bg-teal-400/10 text-teal-300',
+          )}>
+            {slideStatusLabel}
+          </span>
+          <span className="text-xs font-semibold text-gray-300">{currentSlide + 1}/{totalSlides}</span>
         </div>
       </header>
 
       {/* Slide area */}
-      <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden p-2 sm:p-4">
         <canvas
           ref={canvasRef}
           className="max-w-full max-h-full rounded-lg shadow-2xl object-contain"
@@ -979,49 +973,43 @@ export function OnlineClassView() {
       </div>
 
       {/* Bottom bar */}
-      <footer className="bg-gray-800 border-t border-gray-700 px-4 py-3 flex items-center justify-between flex-shrink-0">
-        
-        {/* Left: Back button & Progress bar */}
-        <div className="flex-1 flex items-center gap-4">
-          <button
-            onClick={handleBack}
-            disabled={currentSlide === 0}
-            className={clsx(
-              'px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-1 transition-all',
-              currentSlide > 0
-                ? 'bg-gray-700 hover:bg-gray-600 text-white'
-                : 'bg-transparent text-gray-600 cursor-not-allowed opacity-50'
-            )}
-          >
-            <ChevronLeft className="w-4 h-4" /> Voltar
-          </button>
-          
-          <div className="hidden sm:block max-w-[150px] w-full">
-            <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-teal-500 rounded-full transition-all duration-300"
-                style={{ width: `${slidePct}%` }}
-              />
+      <footer className="flex-shrink-0 border-t border-gray-700 bg-gray-800 px-3 py-3 sm:px-4">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-3 flex items-center gap-3">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-700" aria-label={`${slidePct}% da aula liberada`}>
+              <div className="h-full rounded-full bg-teal-500 transition-all duration-300" style={{ width: `${slidePct}%` }} />
             </div>
-            <span className="text-[10px] text-gray-500 mt-1 block">{slidePct}% lido</span>
+            <span className="min-w-[72px] text-right text-xs font-semibold text-gray-300">{unlockedForDisplay}/{totalSlides} vistos</span>
           </div>
-        </div>
 
-        {/* Center: Error messages */}
-        <div className="flex-1 text-center">
-          {advanceError && (
-            <p className="text-xs text-amber-400">{advanceError}</p>
-          )}
-        </div>
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:gap-4">
+            <button
+              onClick={handleBack}
+              disabled={currentSlide === 0}
+              className={clsx(
+                'flex h-10 items-center gap-1 rounded-lg px-3 text-sm font-semibold transition-colors sm:px-4',
+                currentSlide > 0
+                  ? 'bg-gray-700 text-white hover:bg-gray-600'
+                  : 'cursor-not-allowed bg-transparent text-gray-600 opacity-50'
+              )}
+            >
+              <ChevronLeft className="h-4 w-4" /> <span className="hidden sm:inline">Anterior</span>
+            </button>
 
-        {/* Right: Advance button */}
-        <div className="flex-1 flex justify-end">
+            <div className="min-w-0 text-center">
+              <p className={clsx('truncate text-xs font-semibold', slideAccessState === 'waiting' ? 'text-amber-300' : 'text-teal-300')}>
+                {advanceError || slideStatusLabel}
+              </p>
+              {isHistoricalSlide && !progress?.completed_at && <p className="hidden text-[11px] text-gray-500 sm:block">Slides já vistos não exigem nova espera.</p>}
+            </div>
+
+            <div className="flex justify-end">
           {currentSlide >= totalSlides - 1 ? (
             <button
               onClick={handleComplete}
               disabled={!canAdvance}
               className={clsx(
-                'px-6 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all',
+                'flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-bold transition-colors sm:px-5',
                 canAdvance
                   ? 'bg-green-600 hover:bg-green-500 text-white'
                   : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -1034,7 +1022,7 @@ export function OnlineClassView() {
               onClick={handleAdvance}
               disabled={!canAdvance || advancing}
               className={clsx(
-                'px-6 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all',
+                'flex h-10 items-center gap-1 rounded-lg px-3 text-sm font-bold transition-colors sm:gap-2 sm:px-5',
                 canAdvance
                   ? 'bg-teal-600 hover:bg-teal-500 text-white'
                   : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -1043,13 +1031,15 @@ export function OnlineClassView() {
               {advancing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : isHistoricalSlide ? (
-                <span className="text-sm">Avançar</span>
+                <span className="hidden text-sm sm:inline">Próximo</span>
               ) : (
-                <span className="text-sm">{canAdvance ? 'Avançar' : `Aguarde ${formatTime(Math.max(0, minRequired - elapsed))}`}</span>
+                <span className="hidden text-sm sm:inline">{canAdvance ? 'Próximo' : 'Aguarde'}</span>
               )}
               {!advancing && <ChevronRight className="w-4 h-4" />}
             </button>
           )}
+            </div>
+          </div>
         </div>
       </footer>
     </main>

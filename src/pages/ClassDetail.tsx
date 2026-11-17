@@ -12,6 +12,7 @@ import { PracticalAttendanceViewer } from '../components/PracticalAttendanceView
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { AttemptDetailsModal } from '../components/AttemptDetailsModal';
 import { maskIdentifier } from '../lib/format';
+import { buildAttendanceStages, getNextAttendanceAction } from '../lib/classOperationModel';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export function ClassDetail() {
@@ -657,31 +658,102 @@ export function ClassDetail() {
     return { name: reg.full_name || reg.identifier, points: calcPoints(att) };
   }).sort((a, b) => b.points - a.points);
 
+  const attendanceStages = classData.type === 'online' ? [] : buildAttendanceStages({
+    isPractical: isPracticalClass,
+    durationMinutes: classData.qr_duration_minutes || 10,
+    points: { start: pStart, middle: pMiddle, end: pEnd },
+    activeAt: {
+      start: classData.qr_start_at,
+      middle: classData.qr_middle_at,
+      end: classData.qr_end_at,
+    },
+    attendances,
+  });
+  const nextAttendanceAction = getNextAttendanceAction(attendanceStages);
+  const confirmedParticipants = attendances.filter(attendance => (
+    Number(attendance.scan_start) > 0
+    || Number(attendance.scan_middle) > 0
+    || Number(attendance.scan_end) > 0
+    || Number(attendance.justification) > 0
+  )).length;
+  const classStatus = {
+    scheduled: { label: 'Agendada', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+    active: { label: 'Em andamento', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    completed: { label: 'Concluída', className: 'bg-slate-100 text-slate-600 border-slate-200' },
+  }[classData.status as 'scheduled' | 'active' | 'completed'] || {
+    label: classData.status,
+    className: 'bg-slate-100 text-slate-600 border-slate-200',
+  };
+  const classTypeLabel = isOnlineClass ? 'Online' : isPracticalClass ? 'Prática guiada' : 'Presencial';
+
+  const handleCompleteClass = async () => {
+    const openStage = attendanceStages.find(stage => stage.state === 'open');
+    const warning = openStage
+      ? `O QR de ${openStage.label.toLocaleLowerCase('pt-BR')} ainda está disponível. `
+      : '';
+    if (!window.confirm(`${warning}Deseja concluir a aula? Os registros já realizados serão preservados.`)) return;
+    await updateClass({ status: 'completed' });
+  };
+
   return (
     <div className="space-y-6">
       <Link to={`/course/${classData.course_id}`} className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-teal-600 transition-colors">
         <ArrowLeft className="w-4 h-4" /> Voltar ao Curso
       </Link>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{classData.title}</h1>
-          <p className="text-gray-500 mt-1">{classData.date ? format(new Date(classData.date), "dd/MM/yyyy 'às' HH:mm") : ''}</p>
-        </div>
-        <div className="flex gap-3 flex-wrap items-center">
-          
-          {classData.status === 'scheduled' && (
-            <div className="flex items-center gap-2 mr-2 border-r border-gray-200 pr-4">
-              <button onClick={openEditModal} className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors" title="Editar Aula">
-                <Pencil className="w-5 h-5" />
-              </button>
-              <button onClick={handleDeleteClass} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir Aula">
-                <Trash2 className="w-5 h-5" />
-              </button>
+      <header className="border-b border-gray-200 pb-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className={clsx('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold', classStatus.className)}>
+                {classStatus.label}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600">
+                {classTypeLabel}
+              </span>
             </div>
-          )}
+            <h1 className="text-2xl font-bold text-gray-950 md:text-3xl">{classData.title}</h1>
+            <p className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+              <Clock className="h-4 w-4" />
+              {classData.date ? format(new Date(classData.date), "dd/MM/yyyy 'às' HH:mm") : 'Data não informada'}
+            </p>
+          </div>
 
-          <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+          <div className="flex flex-wrap items-center gap-2">
+            {classData.status === 'scheduled' && (
+              <>
+                <button onClick={openEditModal} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700" title="Editar aula" aria-label="Editar aula">
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button onClick={handleDeleteClass} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700" title="Excluir aula" aria-label="Excluir aula">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            {classData.status === 'scheduled' && (
+              <button onClick={() => updateClass({ status: 'active' })} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-emerald-700">
+                <Play className="h-4 w-4" /> Iniciar aula
+              </button>
+            )}
+            {classData.status === 'active' && (
+              <>
+                {!classData.is_interactive && !isPracticalClass && (
+                  <input type="file" accept="application/pdf" ref={fileInputRef} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) setPresentationFile(file); }} />
+                )}
+                <button onClick={handlePresent} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-teal-700">
+                  <Presentation className="h-4 w-4" /> {isPracticalClass ? 'Apresentar chamada' : 'Abrir apresentação'}
+                </button>
+                <button onClick={handleCompleteClass} className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+                  <CheckCircle2 className="h-4 w-4" /> Concluir aula
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-gray-100 pt-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-h-10 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3">
             <Clock className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-600">Duração QR:</span>
             {editingDuration && classData.status !== 'completed' ? (
@@ -701,9 +773,9 @@ export function ClassDetail() {
                 {classData.status !== 'completed' && <button onClick={() => setEditingDuration(true)} className="text-xs text-teal-600 underline">Editar</button>}
               </div>
             )}
-          </div>
+            </div>
 
-          <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+            <div className="flex min-h-10 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3">
             <Award className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-600">Pontuação:</span>
             {editingPoints && classData.status !== 'completed' ? (
@@ -725,15 +797,15 @@ export function ClassDetail() {
                 {classData.status !== 'completed' && <button onClick={() => setEditingPoints(true)} className="text-xs text-teal-600 underline">Editar</button>}
               </div>
             )}
-          </div>
+            </div>
 
-          {classData.type === 'online' && (
-            <button onClick={copyLink} className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+            {classData.type === 'online' && (
+            <button onClick={copyLink} className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
               {linkCopied ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />} 
               Link Aula Online
             </button>
-          )}
-          {(classData.status === 'active' || classData.status === 'completed') && (
+            )}
+            {(classData.status === 'active' || classData.status === 'completed') && (
             <button onClick={async () => {
               if (allUsers.length === 0) {
                 try {
@@ -744,33 +816,17 @@ export function ClassDetail() {
                 }
               }
               setShowManualAttendanceModal(true);
-            }} className="px-4 py-2 bg-teal-100 hover:bg-teal-200 text-teal-800 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-              <UserCheck className="w-4 h-4" /> Registrar presença manual
+            }} className="inline-flex h-10 items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 text-sm font-medium text-teal-800 transition-colors hover:bg-teal-100">
+              <UserCheck className="w-4 h-4" /> Ajustar presença
             </button>
-          )}
-          
-          {classData.status === 'scheduled' && (
-            <button onClick={() => updateClass({ status: 'active' })} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-              <Play className="w-4 h-4" /> Iniciar Aula
-            </button>
-          )}
-          {classData.status === 'active' && (
-            <>
-              {!classData.is_interactive && !isPracticalClass && (
-                <input type="file" accept="application/pdf" ref={fileInputRef} className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) setPresentationFile(file); }} />
-              )}
-              <button onClick={handlePresent} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-                <Presentation className="w-4 h-4" /> {isPracticalClass ? 'Apresentar QR Codes' : classData.is_interactive ? 'Apresentar presencialmente' : (classData.presentation_url ? 'Apresentar' : 'Apresentar PDF')}
-              </button>
-              <button onClick={() => updateClass({ status: 'completed' })} className="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" /> Concluir Aula
-              </button>
-            </>
-          )}
-          <button onClick={exportCSV} disabled={registrations.length === 0} className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 disabled:opacity-50 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+          <button onClick={exportCSV} disabled={registrations.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 disabled:opacity-50">
             <Download className="w-4 h-4" /> Exportar CSV
           </button>
-          <button onClick={exportPDF} disabled={registrations.length === 0} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 disabled:opacity-50 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+          <button onClick={exportPDF} disabled={registrations.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 disabled:opacity-50">
             <FileText className="w-4 h-4" /> Exportar PDF
           </button>
           <button onClick={async () => {
@@ -786,11 +842,12 @@ export function ClassDetail() {
                 alert(err?.message || 'Erro ao reutilizar aula');
               }
             }
-          }} className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-            <Copy className="w-4 h-4" /> Reutilizar Aula
+          }} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100">
+            <Copy className="w-4 h-4" /> Reutilizar aula
           </button>
+          </div>
         </div>
-      </div>
+      </header>
 
         {/* Manual attendance modal */}
         {showManualAttendanceModal && (
@@ -916,7 +973,39 @@ export function ClassDetail() {
       )}
 
       {classData.status === 'active' && classData.type !== 'online' && (
-        <div className={clsx('grid gap-6', isPracticalClass ? 'md:grid-cols-2' : 'md:grid-cols-3')}>
+        <section className="space-y-5" aria-labelledby="attendance-operation-title">
+          <div className="grid gap-5 border-y border-gray-200 bg-gray-50 px-4 py-5 lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1.8fr)] lg:px-6">
+            <div>
+              <p className="text-xs font-semibold uppercase text-teal-700">Operação da aula</p>
+              <h2 id="attendance-operation-title" className="mt-1 text-lg font-bold text-gray-950">{nextAttendanceAction}</h2>
+              <p className="mt-2 text-sm text-gray-500">
+                {confirmedParticipants} de {registrations.length} participante(s) com presença registrada
+              </p>
+            </div>
+            <ol className={clsx('grid gap-3', isPracticalClass ? 'sm:grid-cols-2' : 'sm:grid-cols-3')}>
+              {attendanceStages.map((stage, index) => (
+                <li key={stage.step} className="flex min-w-0 items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-3">
+                  <span className={clsx(
+                    'flex h-8 w-8 flex-none items-center justify-center rounded-full text-xs font-bold',
+                    stage.state === 'open' && 'bg-emerald-600 text-white',
+                    stage.state === 'expired' && 'bg-gray-200 text-gray-600',
+                    stage.state === 'waiting' && 'border border-gray-300 bg-white text-gray-500',
+                  )}>
+                    {stage.state === 'expired' ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-gray-800">{stage.label}</span>
+                    <span className="block text-xs text-gray-500">
+                      {stage.state === 'open' ? 'Registro aberto' : stage.state === 'expired' ? 'Janela encerrada' : 'Aguardando'}
+                    </span>
+                  </span>
+                  <span className="flex-none text-xs font-semibold text-gray-500">{stage.confirmed}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <div className={clsx('grid gap-5', isPracticalClass ? 'md:grid-cols-2' : 'md:grid-cols-3')}>
           <QRCard
             url={`${appUrl}/#/s/${classId}/start`}
             title={`Entrada (Início) - ${pStart} pts`}
@@ -949,7 +1038,8 @@ export function ClassDetail() {
             onActivate={() => activateQRStep('end')}
             durationMinutes={classData.qr_duration_minutes || 10}
           />
-        </div>
+          </div>
+        </section>
       )}
 
       {classData.status === 'active' && classData.type === 'online' && (
@@ -1690,17 +1780,21 @@ function QRCard({ title, description, url, step, attendances, activeAt, onActiva
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!activeAt) return;
-    const interval = setInterval(() => {
+    if (!activeAt) {
+      setTimeLeft(null);
+      return;
+    }
+    const updateTimeLeft = () => {
       const expiresAt = Number(activeAt) + (durationMinutes * 60 * 1000);
       const remaining = expiresAt - Date.now();
       if (remaining <= 0) {
         setTimeLeft(0);
-        clearInterval(interval);
       } else {
         setTimeLeft(remaining);
       }
-    }, 1000);
+    };
+    updateTimeLeft();
+    const interval = setInterval(updateTimeLeft, 1000);
     return () => clearInterval(interval);
   }, [activeAt, durationMinutes]);
 
@@ -1722,30 +1816,42 @@ function QRCard({ title, description, url, step, attendances, activeAt, onActiva
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const isActive = activeAt && timeLeft !== null && timeLeft > 0;
-  const isExpired = activeAt && timeLeft === 0;
+  const isActive = Boolean(activeAt && timeLeft !== null && timeLeft > 0);
+  const isExpired = Boolean(activeAt && timeLeft === 0);
 
   return (
-    <div className={clsx("bg-white p-6 rounded-xl border shadow-md flex flex-col items-center text-center transition-all h-full", isActive ? "border-teal-400" : "border-gray-200")}>
-      <h3 className="font-semibold text-gray-900 mb-1">{title}</h3>
-      <p className="text-xs text-gray-500 mb-6">{description}</p>
+    <article className={clsx("flex h-full min-h-[510px] flex-col border bg-white p-5 text-center shadow-sm transition-colors rounded-lg", isActive ? "border-emerald-400 ring-2 ring-emerald-100" : "border-gray-200")}>
+      <div className="flex items-start justify-between gap-3 text-left">
+        <div>
+          <h3 className="font-semibold text-gray-900">{title}</h3>
+          <p className="mt-1 text-xs text-gray-500">{description}</p>
+        </div>
+        <span className={clsx(
+          'flex-none rounded-full border px-2 py-1 text-[11px] font-semibold',
+          isActive && 'border-emerald-200 bg-emerald-50 text-emerald-700',
+          isExpired && 'border-gray-200 bg-gray-100 text-gray-600',
+          !activeAt && 'border-amber-200 bg-amber-50 text-amber-700',
+        )}>
+          {isActive ? 'Aberto' : isExpired ? 'Encerrado' : 'Aguardando'}
+        </span>
+      </div>
       
       {!activeAt ? (
-        <div className="flex-1 flex flex-col items-center justify-center min-h-[200px]">
-          <button onClick={onActivate} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl shadow-md font-bold flex items-center gap-2 transition-transform hover:scale-105">
+        <div className="flex min-h-[330px] flex-1 flex-col items-center justify-center">
+          <button onClick={onActivate} className="flex items-center gap-2 rounded-lg bg-teal-600 px-6 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-teal-700">
             <PlayCircle className="w-5 h-5" /> Exibir QR Code
           </button>
-          <p className="text-xs text-gray-400 mt-4 max-w-[200px]">Iniciará o contador regressivo de {durationMinutes} minutos.</p>
+          <p className="mt-4 max-w-[220px] text-xs leading-5 text-gray-400">A janela ficará disponível por {durationMinutes} minutos e não encerra a aula.</p>
         </div>
       ) : (
         <>
-          <div className={clsx("p-4 rounded-xl border flex-shrink-0 transition-opacity", isActive ? "bg-white border-2 border-teal-200" : "bg-gray-50 border-gray-200 opacity-50")}>
+          <div className={clsx("mx-auto mt-6 flex-shrink-0 rounded-lg border p-4 transition-opacity", isActive ? "border-2 border-emerald-200 bg-white" : "border-gray-200 bg-gray-50 opacity-50")}>
             <QRCodeSVG value={url} size={160} level="H" includeMargin={false} />
           </div>
           
           <div className="mt-4 mb-2 min-h-[24px]">
             {isActive ? (
-               <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold animate-pulse">
+               <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
                  <Clock className="w-3.5 h-3.5" /> Expira em {formatMinSec(timeLeft!)}
                </div>
             ) : isExpired ? (
@@ -1753,10 +1859,13 @@ function QRCard({ title, description, url, step, attendances, activeAt, onActiva
             ) : null}
           </div>
 
-          <a href={url} target="_blank" rel="noreferrer" className="text-xs font-medium text-teal-600 hover:underline break-all mb-4">Abrir Link Teste</a>
+          <a href={url} target="_blank" rel="noreferrer" className="mb-4 text-xs font-medium text-teal-700 hover:underline">Abrir link em nova aba</a>
 
           <div className="w-full mt-auto border-t border-gray-100 pt-4">
-            <p className="text-xs font-bold text-gray-400 mb-3 text-left">ÚLTIMOS CONFIRMADOS</p>
+            <div className="mb-3 flex items-center justify-between gap-2 text-left">
+              <p className="text-xs font-bold text-gray-400">ÚLTIMOS CONFIRMADOS</p>
+              <span className="text-xs font-semibold text-gray-600">{recentScans.length > 0 ? `${recentScans.length}${recentScans.length === 5 ? '+' : ''}` : '0'}</span>
+            </div>
             <div className="flex flex-col gap-2 min-h-[100px]">
               {recentScans.length === 0 ? (
                 <p className="text-xs text-gray-400 italic text-left">Nenhuma leitura...</p>
@@ -1772,6 +1881,6 @@ function QRCard({ title, description, url, step, attendances, activeAt, onActiva
           </div>
         </>
       )}
-    </div>
+    </article>
   );
 }

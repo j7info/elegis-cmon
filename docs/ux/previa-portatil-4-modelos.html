@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>eLegis Formação - Prévia dos 4 modelos</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2312304a'/%3E%3Cpath d='M32 10 49 18v15c0 11-7 18-17 23-10-5-17-12-17-23V18Z' fill='white'/%3E%3Cpath d='M32 12v41M17 31h30' stroke='%2312304a' stroke-width='3'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --navy: #12304a;
+      --navy-2: #1b4564;
+      --teal: #0f766e;
+      --teal-2: #14b8a6;
+      --blue: #2563eb;
+      --blue-soft: #eaf2ff;
+      --green: #15803d;
+      --green-soft: #e8f7f4;
+      --amber: #d97706;
+      --amber-soft: #fff4e5;
+      --red: #b42318;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d8e1ea;
+      --surface: #ffffff;
+      --canvas: #eef2f6;
+      --soft: #f4f7fa;
+      --shadow: 0 18px 50px rgba(18, 48, 74, .14);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--canvas);
+      color-scheme: light;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--canvas); }
+    body { margin: 0; min-height: 100vh; background: var(--canvas); }
+    button, input { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible { outline: 3px solid rgba(37, 99, 235, .28); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+
+    .review-header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto auto;
+      gap: 18px;
+      align-items: center;
+      padding: 14px 24px;
+      background: rgba(255,255,255,.96);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+    }
+
+    .review-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .crest {
+      width: 42px;
+      height: 42px;
+      flex: 0 0 42px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      object-fit: contain;
+      background: white;
+    }
+    .review-brand strong { display: block; color: var(--navy); font-size: 15px; }
+    .review-brand span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+    .model-switcher, .device-switcher {
+      display: flex;
+      gap: 5px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      border-radius: 8px;
+    }
+    .model-switcher button, .device-switcher button {
+      min-height: 34px;
+      padding: 7px 12px;
+      border: 0;
+      border-radius: 6px;
+      color: #475467;
+      background: transparent;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .model-switcher button[aria-selected="true"] { color: white; background: var(--navy); }
+    .device-switcher button[aria-pressed="true"] { color: var(--navy); background: white; box-shadow: 0 1px 4px rgba(18,48,74,.12); }
+
+    .review-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 22px;
+      width: min(1680px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .preview-area { min-width: 0; }
+    .preview-toolbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 12px;
+    }
+    .preview-title { margin: 0; color: var(--navy); font-size: clamp(20px, 2vw, 28px); line-height: 1.15; }
+    .preview-subtitle { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .simulation-note { color: var(--muted); font-size: 11px; text-align: right; }
+
+    .stage {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 620px;
+      padding: 18px;
+      border: 1px solid #d5dde6;
+      background: #dfe5eb;
+      overflow: auto;
+    }
+    .device-shell {
+      position: relative;
+      width: min(100%, 1380px);
+      aspect-ratio: 16 / 9.6;
+      min-height: 640px;
+      overflow: hidden;
+      border: 1px solid #cbd5df;
+      border-radius: 8px;
+      background: var(--soft);
+      box-shadow: var(--shadow);
+      transition: width .22s ease, min-height .22s ease, border-radius .22s ease;
+      container-type: inline-size;
+    }
+    .device-shell.is-mobile {
+      width: 390px;
+      min-height: 844px;
+      aspect-ratio: 390 / 844;
+      border: 8px solid #1f2937;
+      border-radius: 28px;
+      background: white;
+    }
+
+    .review-aside { display: flex; flex-direction: column; gap: 12px; }
+    .aside-panel {
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+    .aside-panel h2, .aside-panel h3 { margin: 0; color: var(--navy); font-size: 15px; line-height: 1.25; }
+    .aside-panel p { margin: 9px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+    .criteria { display: grid; gap: 10px; margin-top: 14px; }
+    .criterion { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; font-size: 12px; color: #475467; }
+    .score { display: flex; gap: 3px; }
+    .score i { display: block; width: 8px; height: 8px; border-radius: 50%; background: #d0d5dd; }
+    .score i.on { background: var(--teal); }
+    .aside-panel.recommendation { border-left: 4px solid var(--teal); background: #f3fbf9; }
+    .keyboard { display: inline-block; margin-top: 10px; padding: 3px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: white; color: #475467; font-size: 11px; }
+
+    .model-screen { position: absolute; inset: 0; display: grid; grid-template-rows: 72px 1fr; background: var(--soft); }
+    .app-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 26px;
+      border-bottom: 1px solid var(--line);
+      background: white;
+    }
+    .app-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .app-brand .crest { width: 38px; height: 38px; flex-basis: 38px; }
+    .app-brand strong { display: block; color: var(--navy); font-size: 15px; line-height: 1.15; }
+    .app-brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .app-user { display: flex; align-items: center; gap: 10px; color: #475467; font-size: 11px; font-weight: 700; }
+    .avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--navy); color: white; font-size: 11px; }
+    .app-body { display: grid; grid-template-columns: 220px 1fr; min-height: 0; }
+    .app-sidebar { padding: 20px 14px; border-right: 1px solid var(--line); background: white; }
+    .side-label { margin: 0 10px 10px; color: #98a2b3; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .side-link {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 40px;
+      margin: 3px 0;
+      padding: 9px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #475467;
+      font-size: 12px;
+      font-weight: 650;
+      text-align: left;
+    }
+    .side-link:hover { background: var(--soft); }
+    .side-link.active { color: white; background: var(--accent, var(--teal)); }
+    .app-main { min-width: 0; overflow: auto; padding: 26px; }
+    .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+    .page-head h2 { margin: 0; color: var(--navy); font-size: 25px; line-height: 1.15; }
+    .page-head p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .primary, .secondary, .danger, .ghost {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 9px 15px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .primary { color: white; background: var(--accent, var(--teal)); }
+    .secondary { color: var(--navy); border-color: var(--line); background: white; }
+    .danger { color: white; background: var(--red); }
+    .ghost { color: var(--accent, var(--teal)); border-color: transparent; background: transparent; }
+    .primary:hover, .danger:hover { filter: brightness(.94); }
+    .secondary:hover { background: var(--soft); }
+    .bottom-nav { display: none; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 25px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .badge.green { color: var(--green); background: var(--green-soft); }
+    .badge.amber { color: var(--amber); background: var(--amber-soft); }
+    .badge.blue { color: var(--blue); background: var(--blue-soft); }
+    .badge.gray { color: #475467; background: #edf1f5; }
+    .progress { height: 8px; overflow: hidden; border-radius: 4px; background: #e4e7ec; }
+    .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent, var(--teal)); transition: width .3s ease; }
+    .empty { padding: 30px; border: 1px dashed #b8c3cf; color: var(--muted); background: rgba(255,255,255,.55); text-align: center; font-size: 12px; }
+
+    /* Model 1 */
+    #model-1 { --accent: var(--teal); }
+    .track-banner {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 22px;
+      margin-bottom: 16px;
+      padding: 22px;
+      border-radius: 8px;
+      color: white;
+      background: var(--navy);
+    }
+    .track-banner h3 { margin: 0; font-size: 18px; }
+    .track-banner p { margin: 7px 0 0; color: #cfe8e4; font-size: 11px; }
+    .track-banner .progress { align-self: center; background: #315069; }
+    .track-banner .progress span { background: #2dd4bf; }
+    .track-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
+    .module-list { display: grid; gap: 10px; }
+    .module-row {
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr) 90px 38px;
+      align-items: center;
+      gap: 14px;
+      min-height: 73px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      text-align: left;
+    }
+    .module-row:hover, .module-row.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(15,118,110,.08); }
+    .module-number { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 6px; background: var(--green-soft); color: var(--teal); font-size: 12px; font-weight: 900; }
+    .module-row strong { display: block; color: var(--ink); font-size: 12px; }
+    .module-row small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .module-percent { color: #475467; font-size: 11px; font-weight: 800; }
+    .module-arrow { color: var(--teal); font-size: 18px; font-weight: 900; }
+    .next-panel { align-self: start; border: 1px solid var(--line); border-radius: 7px; background: white; }
+    .next-panel section { padding: 18px; }
+    .next-panel section + section { border-top: 1px solid var(--line); }
+    .next-panel h3 { margin: 0 0 8px; color: var(--navy); font-size: 13px; }
+    .next-panel p { margin: 0 0 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .next-panel .primary { width: 100%; }
+
+    /* Model 2 */
+    #model-2 { --accent: var(--blue); }
+    .catalog-tabs { display: flex; gap: 5px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .catalog-tabs button { padding: 10px 13px; border: 0; border-bottom: 3px solid transparent; color: var(--muted); background: transparent; font-size: 11px; font-weight: 800; }
+    .catalog-tabs button.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .continue-band { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; margin-bottom: 18px; padding: 18px 20px; color: white; background: var(--navy); }
+    .continue-band small { color: #cfe8e4; font-size: 10px; font-weight: 800; }
+    .continue-band h3 { margin: 5px 0 0; font-size: 17px; }
+    .continue-band .primary { color: var(--navy); background: #2dd4bf; }
+    .course-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .course-card { display: flex; flex-direction: column; min-height: 210px; padding: 17px; border: 1px solid var(--line); border-radius: 7px; background: white; }
+    .course-card:hover { border-color: #93b4ff; }
+    .course-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .course-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 7px; color: var(--blue); background: var(--blue-soft); font-size: 16px; font-weight: 900; }
+    .course-card h3 { margin: 18px 0 5px; color: var(--ink); font-size: 15px; }
+    .course-card p { margin: 0 0 16px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+    .course-card .progress { margin-top: auto; }
+    .course-card .primary, .course-card .secondary { width: 100%; margin-top: auto; }
+    .catalog-search { display: flex; align-items: center; gap: 8px; min-width: 220px; padding: 9px 11px; border: 1px solid var(--line); background: white; }
+    .catalog-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 11px; }
+
+    /* Model 3 */
+    #model-3 { --accent: var(--amber); }
+    .class-command { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; margin-bottom: 14px; padding: 16px 18px; border: 1px solid var(--line); background: white; }
+    .class-command h3 { margin: 0; color: var(--navy); font-size: 17px; }
+    .class-command p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
+    .command-actions { display: flex; gap: 7px; }
+    .command-actions .primary { --accent: var(--teal); }
+    .command-actions .secondary { color: var(--blue); border-color: #9bb9ff; }
+    .stage-rail { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; padding: 14px; background: var(--navy); }
+    .attendance-stage { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 10px; padding: 9px 12px; color: white; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); }
+    .attendance-stage.active { border-color: #2dd4bf; background: rgba(45,212,191,.13); }
+    .stage-number { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: var(--navy); background: #2dd4bf; font-size: 11px; font-weight: 900; }
+    .attendance-stage strong { display: block; font-size: 11px; }
+    .attendance-stage small { display: block; margin-top: 3px; color: #cfe8e4; font-size: 9px; }
+    .attendance-stage .secondary { min-height: 31px; padding: 6px 10px; color: white; border-color: rgba(255,255,255,.35); background: transparent; }
+    .roster { border: 1px solid var(--line); background: white; }
+    .roster-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .roster-head h3 { margin: 0; color: var(--navy); font-size: 13px; }
+    .roster-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .roster-table th, .roster-table td { padding: 10px 12px; border-bottom: 1px solid #edf0f3; text-align: left; font-size: 10px; }
+    .roster-table th { color: var(--muted); background: #f8fafc; font-size: 9px; text-transform: uppercase; }
+    .roster-table td:first-child { font-weight: 750; }
+    .row-action { border: 0; color: var(--blue); background: transparent; font-size: 10px; font-weight: 800; }
+    .row-action.done { color: var(--green); }
+
+    /* Model 4 */
+    #model-4 { --accent: var(--navy); }
+    .role-switch { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); background: var(--soft); }
+    .role-switch button { min-height: 32px; padding: 7px 11px; border: 0; color: var(--muted); background: transparent; font-size: 10px; font-weight: 800; }
+    .role-switch button.active { color: white; background: var(--navy); }
+    .welcome { margin-bottom: 16px; }
+    .welcome h2 { margin: 0; color: var(--navy); font-size: 25px; }
+    .welcome p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+    .adaptive-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .65fr); gap: 16px; }
+    .focus-action { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; min-height: 126px; padding: 20px; color: white; background: var(--navy); }
+    .focus-action small { color: #cfe8e4; font-size: 10px; font-weight: 800; }
+    .focus-action h3 { margin: 6px 0 0; font-size: 18px; }
+    .focus-action .primary { color: var(--navy); background: #2dd4bf; }
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+    .metric { min-height: 92px; padding: 16px; border: 1px solid var(--line); background: white; }
+    .metric small { color: var(--muted); font-size: 9px; font-weight: 800; }
+    .metric strong { display: block; margin-top: 8px; color: var(--navy); font-size: 22px; }
+    .metric.blue { background: var(--blue-soft); border-color: transparent; }
+    .metric.amber { background: var(--amber-soft); border-color: transparent; }
+    .metric.green { background: var(--green-soft); border-color: transparent; }
+    .agenda { border: 1px solid var(--line); background: white; }
+    .agenda h3 { margin: 0; padding: 15px 16px; border-bottom: 1px solid var(--line); color: var(--navy); font-size: 13px; }
+    .agenda-row { display: grid; grid-template-columns: 46px 1fr; gap: 12px; align-items: center; padding: 13px 16px; border-bottom: 1px solid #edf0f3; }
+    .agenda-row:last-child { border-bottom: 0; }
+    .agenda-time { color: var(--blue); font-size: 10px; font-weight: 900; }
+    .agenda-row strong { display: block; font-size: 11px; }
+    .agenda-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .admin-list { display: grid; gap: 10px; }
+    .admin-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); background: white; }
+    .admin-row strong { font-size: 12px; }
+    .admin-row small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+
+    .toast {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      z-index: 20;
+      max-width: 320px;
+      padding: 12px 15px;
+      border-radius: 6px;
+      color: white;
+      background: var(--navy);
+      box-shadow: 0 10px 32px rgba(18,48,74,.25);
+      font-size: 11px;
+      font-weight: 700;
+      opacity: 0;
+      transform: translateY(10px);
+      pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    .device-shell.is-mobile .model-screen { grid-template-rows: 64px 1fr 58px; }
+    .device-shell.is-mobile .app-topbar { padding: 0 14px; }
+    .device-shell.is-mobile .app-user > span { display: none; }
+    .device-shell.is-mobile .app-brand strong { font-size: 13px; }
+    .device-shell.is-mobile .app-brand small { font-size: 9px; }
+    .device-shell.is-mobile .app-body { display: block; overflow: hidden; }
+    .device-shell.is-mobile .app-sidebar { display: none; }
+    .device-shell.is-mobile .app-main { height: 100%; padding: 16px 14px 20px; }
+    .device-shell.is-mobile .bottom-nav { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); background: white; }
+    .device-shell.is-mobile .bottom-nav button { border: 0; color: var(--muted); background: transparent; font-size: 9px; font-weight: 800; }
+    .device-shell.is-mobile .bottom-nav button.active { color: var(--accent, var(--teal)); }
+    .device-shell.is-mobile .page-head { margin-bottom: 14px; }
+    .device-shell.is-mobile .page-head h2, .device-shell.is-mobile .welcome h2 { font-size: 20px; }
+    .device-shell.is-mobile .page-head > .primary { min-height: 34px; padding: 7px 10px; }
+    .device-shell.is-mobile .track-banner { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
+    .device-shell.is-mobile .track-grid { grid-template-columns: 1fr; }
+    .device-shell.is-mobile .next-panel { order: -1; }
+    .device-shell.is-mobile .next-panel section:last-child { display: none; }
+    .device-shell.is-mobile .module-row { grid-template-columns: 42px minmax(0, 1fr) 35px; min-height: 68px; padding: 10px; }
+    .device-shell.is-mobile .module-percent { display: none; }
+    .device-shell.is-mobile .catalog-search { display: none; }
+    .device-shell.is-mobile .catalog-tabs { overflow-x: auto; }
+    .device-shell.is-mobile .continue-band { grid-template-columns: 1fr; padding: 15px; }
+    .device-shell.is-mobile .continue-band .primary { width: 100%; }
+    .device-shell.is-mobile .course-grid { grid-template-columns: 1fr; }
+    .device-shell.is-mobile .course-card { min-height: 165px; }
+    .device-shell.is-mobile .class-command { grid-template-columns: 1fr; }
+    .device-shell.is-mobile .command-actions { display: grid; grid-template-columns: 1fr 1fr; }
+    .device-shell.is-mobile .command-actions .danger { grid-column: 1 / -1; }
+    .device-shell.is-mobile .stage-rail { grid-template-columns: 1fr; }
+    .device-shell.is-mobile .roster-table thead { display: none; }
+    .device-shell.is-mobile .roster-table, .device-shell.is-mobile .roster-table tbody, .device-shell.is-mobile .roster-table tr, .device-shell.is-mobile .roster-table td { display: block; width: 100%; }
+    .device-shell.is-mobile .roster-table tr { padding: 11px 13px; border-bottom: 1px solid var(--line); }
+    .device-shell.is-mobile .roster-table td { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border: 0; }
+    .device-shell.is-mobile .roster-table td::before { content: attr(data-label); color: var(--muted); font-size: 9px; font-weight: 700; }
+    .device-shell.is-mobile .adaptive-grid { grid-template-columns: 1fr; }
+    .device-shell.is-mobile .focus-action { grid-template-columns: 1fr; padding: 16px; }
+    .device-shell.is-mobile .focus-action .primary { width: 100%; }
+    .device-shell.is-mobile .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .device-shell.is-mobile .metric { min-height: 76px; padding: 11px; }
+    .device-shell.is-mobile .metric strong { font-size: 18px; }
+    .device-shell.is-mobile .role-switch { max-width: 100%; overflow-x: auto; }
+    .device-shell.is-mobile #model-4 .app-brand > div { display: none; }
+    .device-shell.is-mobile #model-4 .role-switch { flex: 1; justify-content: stretch; overflow: hidden; }
+    .device-shell.is-mobile #model-4 .role-switch button { flex: 1; min-width: 0; padding-inline: 7px; }
+
+    @container (max-width: 1000px) {
+      .device-shell:not(.is-mobile) .app-body { grid-template-columns: 180px 1fr; }
+      .device-shell:not(.is-mobile) .track-grid { grid-template-columns: 1fr; }
+      .device-shell:not(.is-mobile) .next-panel { display: grid; grid-template-columns: 1fr 1fr; }
+      .device-shell:not(.is-mobile) .next-panel section + section { border-top: 0; border-left: 1px solid var(--line); }
+      .device-shell:not(.is-mobile) .course-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .device-shell:not(.is-mobile) .class-command { grid-template-columns: 1fr; }
+      .device-shell:not(.is-mobile) .command-actions { flex-wrap: wrap; }
+      .device-shell:not(.is-mobile) .adaptive-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 1180px) {
+      .review-header { grid-template-columns: 1fr auto; }
+      .model-switcher { grid-row: 2; grid-column: 1 / -1; overflow-x: auto; }
+      .review-body { grid-template-columns: 1fr; }
+      .review-aside { display: grid; grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 760px) {
+      .review-header { padding: 12px; gap: 10px; }
+      .review-brand span { display: none; }
+      .review-body { padding: 12px; }
+      .review-aside { grid-template-columns: 1fr; }
+      .preview-toolbar { align-items: flex-start; flex-direction: column; }
+      .simulation-note { text-align: left; }
+      .stage { padding: 8px; }
+      .device-shell:not(.is-mobile) { min-width: 760px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-header">
+    <div class="review-brand">
+      <img class="crest" alt="Brasão de Ourilândia do Norte" id="review-crest">
+      <div><strong>Prévia de experiência e design</strong><span>Quatro caminhos para o eLegis Formação</span></div>
+    </div>
+    <nav class="model-switcher" aria-label="Escolher modelo">
+      <button type="button" data-model="1" aria-selected="true">1. Trilhas</button>
+      <button type="button" data-model="2" aria-selected="false">2. Catálogo</button>
+      <button type="button" data-model="3" aria-selected="false">3. Central de aula</button>
+      <button type="button" data-model="4" aria-selected="false">4. Hub adaptativo</button>
+    </nav>
+    <div class="device-switcher" aria-label="Tamanho da prévia">
+      <button type="button" data-device="desktop" aria-pressed="true">Desktop</button>
+      <button type="button" data-device="mobile" aria-pressed="false">Celular</button>
+    </div>
+  </header>
+
+  <main class="review-body">
+    <section class="preview-area" aria-labelledby="current-title">
+      <div class="preview-toolbar">
+        <div><h1 class="preview-title" id="current-title">Modelo 1 - Trilhas Institucionais</h1><p class="preview-subtitle" id="current-subtitle">Curso principal, subcursos e certificado único em uma jornada clara.</p></div>
+        <div class="simulation-note">Dados demonstrativos, sem conexão com produção.</div>
+      </div>
+
+      <div class="stage">
+        <div class="device-shell" id="device-shell">
+          <section class="model-screen" id="model-1" aria-label="Modelo 1 - Trilhas Institucionais">
+            <header class="app-topbar">
+              <div class="app-brand"><img class="crest app-crest" alt=""><div><strong>eLegis Formação</strong><small>Câmara Municipal</small></div></div>
+              <div class="app-user"><span>Ana Beatriz</span><div class="avatar">AB</div></div>
+            </header>
+            <div class="app-body">
+              <aside class="app-sidebar"><p class="side-label">Minha formação</p><button class="side-link">Visão geral</button><button class="side-link active">Minha trilha</button><button class="side-link">Aulas</button><button class="side-link">Desempenho</button><button class="side-link">Certificado</button></aside>
+              <div class="app-main">
+                <div class="page-head"><div><h2>Formação Continuada</h2><p>Ferramentas de apoio ao processo legislativo</p></div><span class="badge green">Em andamento</span></div>
+                <div class="track-banner"><div><h3>3 de 5 módulos iniciados</h3><p>Progresso geral da formação: 58%</p></div><div class="progress"><span style="width:58%"></span></div></div>
+                <div class="track-grid">
+                  <div class="module-list" id="module-list">
+                    <button class="module-row" data-module="Email institucional" data-detail="Concluído com 100% de presença." data-progress="100"><span class="module-number">01</span><span><strong>Email institucional</strong><small>Concluído</small></span><span class="module-percent">100%</span><span class="module-arrow">›</span></button>
+                    <button class="module-row selected" data-module="Drive e colaboração" data-detail="Aula 4 de 6. Restam aproximadamente 12 minutos." data-progress="62"><span class="module-number">02</span><span><strong>Drive e colaboração</strong><small>Continuar aula</small></span><span class="module-percent">62%</span><span class="module-arrow">›</span></button>
+                    <button class="module-row" data-module="SAPL" data-detail="Duas aulas novas aguardando visualização." data-progress="20"><span class="module-number">03</span><span><strong>SAPL</strong><small>2 aulas novas</small></span><span class="module-percent">20%</span><span class="module-arrow">›</span></button>
+                    <button class="module-row" data-module="SIGADOC" data-detail="Módulo disponível para iniciar." data-progress="0"><span class="module-number">04</span><span><strong>SIGADOC</strong><small>Disponível</small></span><span class="module-percent">0%</span><span class="module-arrow">›</span></button>
+                  </div>
+                  <aside class="next-panel"><section><h3 id="module-title">Drive e colaboração</h3><p id="module-detail">Aula 4 de 6. Restam aproximadamente 12 minutos.</p><div class="progress" style="margin-bottom:14px"><span id="module-progress" style="width:62%"></span></div><button class="primary demo-action" data-message="Aula retomada na prévia.">Continuar aula</button></section><section><h3>Certificado único</h3><p>O verso reúne os módulos concluídos e suas cargas horárias.</p><button class="secondary demo-action" data-message="Prévia do certificado aberta.">Ver exemplo</button></section></aside>
+                </div>
+              </div>
+            </div>
+            <nav class="bottom-nav"><button>Início</button><button class="active">Trilha</button><button>Aulas</button><button>Perfil</button></nav>
+          </section>
+
+          <section class="model-screen" id="model-2" aria-label="Modelo 2 - Catálogo Direto" hidden>
+            <header class="app-topbar">
+              <div class="app-brand"><img class="crest app-crest" alt=""><div><strong>eLegis Formação</strong><small>Câmara Municipal</small></div></div>
+              <div class="app-user"><span>Ana Beatriz</span><div class="avatar">AB</div></div>
+            </header>
+            <div class="app-body">
+              <aside class="app-sidebar"><p class="side-label">Aprendizagem</p><button class="side-link active">Meus cursos</button><button class="side-link">Desempenho</button><button class="side-link">Certificados</button><button class="side-link">Perfil</button></aside>
+              <div class="app-main">
+                <div class="page-head"><div><h2>Seus cursos</h2><p>Continue aprendendo ou encontre uma nova formação.</p></div><label class="catalog-search"><span>Buscar</span><input type="search" id="course-search" placeholder="Nome do curso"></label></div>
+                <div class="catalog-tabs" role="tablist"><button class="active" data-catalog="enrolled">Matriculados</button><button data-catalog="available">Disponíveis</button><button data-catalog="completed">Concluídos</button></div>
+                <div id="catalog-enrolled">
+                  <div class="continue-band"><div><small>CONTINUE DE ONDE PAROU</small><h3>Drive e colaboração - Aula 4 de 6</h3></div><button class="primary demo-action" data-message="Aula retomada na prévia.">Retomar aula</button></div>
+                  <div class="course-grid filterable-courses">
+                    <article class="course-card" data-course="Email institucional"><div class="course-card-head"><div class="course-mark">E</div><span class="badge green">Concluído</span></div><h3>Email institucional</h3><p>Orientações para uso seguro do email corporativo.</p><div class="progress"><span style="width:100%;background:var(--green)"></span></div></article>
+                    <article class="course-card" data-course="SAPL"><div class="course-card-head"><div class="course-mark">S</div><span class="badge amber">1 aula nova</span></div><h3>SAPL</h3><p>Sistema de Apoio ao Processo Legislativo.</p><div class="progress"><span style="width:40%;background:var(--amber)"></span></div></article>
+                    <article class="course-card" data-course="SIGADOC"><div class="course-card-head"><div class="course-mark">D</div><span class="badge blue">Em andamento</span></div><h3>SIGADOC</h3><p>Gestão de documentos e processos administrativos.</p><div class="progress"><span style="width:18%"></span></div></article>
+                  </div>
+                </div>
+                <div id="catalog-available" hidden><div class="course-grid filterable-courses"><article class="course-card" data-course="Proteção de dados"><div class="course-card-head"><div class="course-mark">P</div><span class="badge blue">Disponível</span></div><h3>Proteção de dados</h3><p>Boas práticas no tratamento de informações institucionais.</p><button class="primary enroll-action">Inscrever-se</button></article><article class="course-card" data-course="Atendimento ao cidadão"><div class="course-card-head"><div class="course-mark">A</div><span class="badge blue">Disponível</span></div><h3>Atendimento ao cidadão</h3><p>Comunicação pública clara e orientação de solicitações.</p><button class="primary enroll-action">Inscrever-se</button></article></div></div>
+                <div id="catalog-completed" hidden><div class="course-grid filterable-courses"><article class="course-card" data-course="Email institucional"><div class="course-card-head"><div class="course-mark">E</div><span class="badge green">Concluído</span></div><h3>Email institucional</h3><p>Concluído em 18 de junho de 2026.</p><button class="secondary demo-action" data-message="Certificado aberto na prévia.">Ver certificado</button></article></div></div>
+              </div>
+            </div>
+            <nav class="bottom-nav"><button class="active">Cursos</button><button>Hoje</button><button>Progresso</button><button>Perfil</button></nav>
+          </section>
+
+          <section class="model-screen" id="model-3" aria-label="Modelo 3 - Central de Aula" hidden>
+            <header class="app-topbar">
+              <div class="app-brand"><img class="crest app-crest" alt=""><div><strong>eLegis Formação</strong><small>Central do professor</small></div></div>
+              <div class="app-user"><span>Prof. Jeferson</span><div class="avatar">PJ</div></div>
+            </header>
+            <div class="app-body">
+              <aside class="app-sidebar"><p class="side-label">Operação</p><button class="side-link">Cursos</button><button class="side-link active">Aulas</button><button class="side-link">Alunos</button><button class="side-link">Certificados</button><button class="side-link">Relatórios</button></aside>
+              <div class="app-main">
+                <div class="class-command"><div><h3>Aula prática: SAPL</h3><p>Hoje, 09:00 • Em andamento • 42 alunos</p></div><div class="command-actions"><button class="primary demo-action" data-message="Janela de presença aberta por 10 minutos.">Abrir presença</button><button class="secondary demo-action" data-message="QR code projetado na prévia.">Projetar QR</button><button class="danger demo-action" data-message="Na aplicação real, o encerramento pediria confirmação.">Encerrar aula</button></div></div>
+                <div class="stage-rail"><div class="attendance-stage active" id="entry-stage"><span class="stage-number">1</span><span><strong>Entrada</strong><small>Concluída às 09:10</small></span><span class="badge green">38 registros</span></div><div class="attendance-stage" id="exit-stage"><span class="stage-number">2</span><span><strong>Saída</strong><small id="exit-status">Abrir às 10:20</small></span><button class="secondary" id="open-exit">Abrir agora</button></div></div>
+                <section class="roster"><div class="roster-head"><h3>Lista de presença</h3><span class="badge green" id="attendance-count">38 confirmados</span></div><table class="roster-table"><thead><tr><th style="width:31%">Aluno</th><th>Entrada</th><th>Saída</th><th>Situação</th><th>Ação</th></tr></thead><tbody>
+                  <tr><td data-label="Aluno">Ana Beatriz</td><td data-label="Entrada">09:02</td><td data-label="Saída">-</td><td data-label="Situação"><span class="badge amber">Parcial</span></td><td data-label="Ação"><button class="row-action">Justificar</button></td></tr>
+                  <tr><td data-label="Aluno">Carlos Silva</td><td data-label="Entrada">09:04</td><td data-label="Saída">-</td><td data-label="Situação"><span class="badge amber">Parcial</span></td><td data-label="Ação"><button class="row-action">Justificar</button></td></tr>
+                  <tr><td data-label="Aluno">Jailton Rocha</td><td data-label="Entrada">09:01</td><td data-label="Saída">-</td><td data-label="Situação"><span class="badge amber">Parcial</span></td><td data-label="Ação"><button class="row-action">Justificar</button></td></tr>
+                  <tr><td data-label="Aluno">Eliane Pereira</td><td data-label="Entrada">09:03</td><td data-label="Saída">-</td><td data-label="Situação"><span class="badge amber">Parcial</span></td><td data-label="Ação"><button class="row-action">Justificar</button></td></tr>
+                </tbody></table></section>
+              </div>
+            </div>
+            <nav class="bottom-nav"><button>Visão</button><button class="active">Aula</button><button>Alunos</button><button>Mais</button></nav>
+          </section>
+
+          <section class="model-screen" id="model-4" aria-label="Modelo 4 - Hub Adaptativo" hidden>
+            <header class="app-topbar">
+              <div class="app-brand"><img class="crest app-crest" alt=""><div><strong>eLegis Formação</strong><small>Experiência adaptada ao papel</small></div></div>
+              <div class="role-switch" aria-label="Escolher papel"><button class="active" data-role="student">Aluno</button><button data-role="teacher">Professor</button><button data-role="admin">Administrador</button></div>
+            </header>
+            <div class="app-body">
+              <aside class="app-sidebar" id="adaptive-sidebar"><p class="side-label">Minha área</p><button class="side-link active">Hoje</button><button class="side-link">Meus cursos</button><button class="side-link">Desempenho</button><button class="side-link">Certificados</button></aside>
+              <div class="app-main">
+                <div id="role-student">
+                  <div class="welcome"><h2>Bom dia, Ana</h2><p>Você tem duas ações importantes para hoje.</p></div>
+                  <div class="adaptive-grid"><div><div class="focus-action"><div><small>CONTINUAR AULA ONLINE</small><h3>Drive e colaboração • 62%</h3></div><button class="primary demo-action" data-message="Aula retomada na prévia.">Retomar</button></div><div class="metric-grid"><div class="metric amber"><small>AULA NOVA</small><strong>1</strong></div><div class="metric green"><small>PRESENÇA</small><strong>82%</strong></div><div class="metric blue"><small>CURSOS</small><strong>3</strong></div></div></div><aside class="agenda"><h3>Agenda de hoje</h3><div class="agenda-row"><span class="agenda-time">09:00</span><span><strong>Aula prática: SAPL</strong><small>Presença presencial</small></span></div><div class="agenda-row"><span class="agenda-time">14:00</span><span><strong>Drive e colaboração</strong><small>Retomar aula online</small></span></div></aside></div>
+                </div>
+                <div id="role-teacher" hidden>
+                  <div class="welcome"><h2>Painel de operação</h2><p>Ações prioritárias e indicadores das suas turmas.</p></div>
+                  <div class="metric-grid"><div class="metric blue"><small>AULAS HOJE</small><strong>3</strong></div><div class="metric amber"><small>PENDÊNCIAS</small><strong>7</strong></div><div class="metric green"><small>ALUNOS</small><strong>126</strong></div></div>
+                  <div class="class-command" style="margin-top:14px"><div><h3>SAPL • Aula prática • 09:00</h3><p>42 alunos • entrada registrada • saída pendente</p></div><button class="primary demo-action" data-message="Central da aula aberta na prévia.">Abrir aula</button></div>
+                  <section class="roster"><div class="roster-head"><h3>Pendências recentes</h3><span class="badge amber">7 ações</span></div><div class="admin-list" style="padding:12px"><div class="admin-row"><span><strong>3 justificativas de presença</strong><small>Aula prática de SAPL</small></span><button class="secondary demo-action" data-message="Pendências de presença abertas.">Revisar</button></div><div class="admin-row"><span><strong>4 alunos sem matrícula confirmada</strong><small>Formação Continuada</small></span><button class="secondary demo-action" data-message="Lista de alunos aberta.">Revisar</button></div></div></section>
+                </div>
+                <div id="role-admin" hidden>
+                  <div class="welcome"><h2>Administração</h2><p>Integridade, usuários, papéis e configurações institucionais.</p></div>
+                  <div class="metric-grid"><div class="metric blue"><small>USUÁRIOS</small><strong>214</strong></div><div class="metric amber"><small>CADASTROS PENDENTES</small><strong>5</strong></div><div class="metric green"><small>CURSOS ATIVOS</small><strong>6</strong></div></div>
+                  <div class="admin-list" style="margin-top:14px"><div class="admin-row"><span><strong>Usuários e papéis</strong><small>Cadastros, matrículas e permissões</small></span><button class="secondary demo-action" data-message="Gestão de usuários aberta.">Gerenciar</button></div><div class="admin-row"><span><strong>Configurações institucionais</strong><small>Identidade, certificados e regras</small></span><button class="secondary demo-action" data-message="Configurações abertas.">Abrir</button></div><div class="admin-row"><span><strong>Integridade e auditoria</strong><small>Duplicidades, vínculos e alterações manuais</small></span><button class="secondary demo-action" data-message="Auditoria aberta.">Verificar</button></div></div>
+                </div>
+              </div>
+            </div>
+            <nav class="bottom-nav"><button class="active">Hoje</button><button>Cursos</button><button>Progresso</button><button>Perfil</button></nav>
+          </section>
+
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="review-aside" aria-label="Notas para decisão">
+      <section class="aside-panel"><h2 id="aside-title">Trilhas Institucionais</h2><p id="aside-summary">Organiza a formação principal como uma jornada contínua, com subcursos tratados como módulos.</p><div class="criteria" id="criteria"></div></section>
+      <section class="aside-panel"><h3>O que experimentar</h3><p id="try-copy">Clique nos módulos e alterne para a visualização de celular.</p><span class="keyboard">Teclas 1 a 4 trocam o modelo</span></section>
+      <section class="aside-panel recommendation"><h3>Combinação recomendada</h3><p>Hub Adaptativo como estrutura geral, Catálogo no dashboard do aluno, Trilhas para cursos e subcursos e Central de Aula para o professor.</p></section>
+    </aside>
+  </main>
+
+  <script>
+    (() => {
+      const transparentCrest = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLkWQAAAABJRU5ErkJggg==";
+      const crestSvg = "data:image/png;base64,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";
+      document.querySelectorAll('#review-crest, .app-crest').forEach(img => img.src = crestSvg.trim() || transparentCrest);
+
+      const models = {
+        1: { title: 'Modelo 1 - Trilhas Institucionais', subtitle: 'Curso principal, subcursos e certificado único em uma jornada clara.', aside: 'Trilhas Institucionais', summary: 'Organiza a formação principal como uma jornada contínua, com subcursos tratados como módulos.', try: 'Clique nos módulos e alterne para a visualização de celular.', scores: [['Clareza para o aluno', 5], ['Eficiência do professor', 3], ['Cursos e subcursos', 5], ['Adoção gradual', 3]] },
+        2: { title: 'Modelo 2 - Catálogo Direto', subtitle: 'Cursos matriculados, disponíveis e concluídos com ações inequívocas.', aside: 'Catálogo Direto', summary: 'Coloca continuidade e inscrição na primeira tela, com o menor impacto sobre os fluxos atuais.', try: 'Troque as abas, pesquise um curso e simule uma inscrição.', scores: [['Clareza para o aluno', 5], ['Eficiência do professor', 3], ['Cursos e subcursos', 4], ['Adoção gradual', 5]] },
+        3: { title: 'Modelo 3 - Central de Aula', subtitle: 'Presença, QR code, lista de alunos e exceções no mesmo contexto operacional.', aside: 'Central de Aula', summary: 'Transforma a página da aula em uma estação de trabalho para o professor conduzir a sessão.', try: 'Abra a etapa de saída e justifique a presença de um aluno.', scores: [['Clareza para o aluno', 3], ['Eficiência do professor', 5], ['Cursos e subcursos', 3], ['Adoção gradual', 4]] },
+        4: { title: 'Modelo 4 - Hub Adaptativo por Papel', subtitle: 'Uma identidade comum com prioridades diferentes para aluno, professor e administrador.', aside: 'Hub Adaptativo', summary: 'Separa densidade e prioridades por papel sem criar linguagens visuais diferentes.', try: 'Alterne entre Aluno, Professor e Administrador e compare as prioridades.', scores: [['Clareza para o aluno', 5], ['Eficiência do professor', 5], ['Cursos e subcursos', 5], ['Adoção gradual', 3]] }
+      };
+
+      const shell = document.getElementById('device-shell');
+      const toast = document.getElementById('toast');
+      let toastTimer;
+
+      function showToast(message) {
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add('show');
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+      }
+
+      function renderCriteria(scores) {
+        document.getElementById('criteria').innerHTML = scores.map(([label, value]) => `<div class="criterion"><span>${label}</span><span class="score" aria-label="${value} de 5">${Array.from({length:5}, (_, i) => `<i class="${i < value ? 'on' : ''}"></i>`).join('')}</span></div>`).join('');
+      }
+
+      function selectModel(number) {
+        document.querySelectorAll('.model-screen').forEach(panel => panel.hidden = panel.id !== `model-${number}`);
+        document.querySelectorAll('.model-switcher button').forEach(button => button.setAttribute('aria-selected', button.dataset.model === String(number)));
+        const data = models[number];
+        document.getElementById('current-title').textContent = data.title;
+        document.getElementById('current-subtitle').textContent = data.subtitle;
+        document.getElementById('aside-title').textContent = data.aside;
+        document.getElementById('aside-summary').textContent = data.summary;
+        document.getElementById('try-copy').textContent = data.try;
+        renderCriteria(data.scores);
+      }
+
+      document.querySelectorAll('.model-switcher button').forEach(button => button.addEventListener('click', () => selectModel(Number(button.dataset.model))));
+      document.querySelectorAll('.device-switcher button').forEach(button => button.addEventListener('click', () => {
+        const mobile = button.dataset.device === 'mobile';
+        shell.classList.toggle('is-mobile', mobile);
+        document.querySelectorAll('.device-switcher button').forEach(item => item.setAttribute('aria-pressed', item === button));
+      }));
+      document.addEventListener('keydown', event => { if (/^[1-4]$/.test(event.key) && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) selectModel(Number(event.key)); });
+
+      document.querySelectorAll('.demo-action').forEach(button => button.addEventListener('click', () => showToast(button.dataset.message || 'Ação simulada.')));
+      document.querySelectorAll('.module-row').forEach(button => button.addEventListener('click', () => {
+        document.querySelectorAll('.module-row').forEach(item => item.classList.toggle('selected', item === button));
+        document.getElementById('module-title').textContent = button.dataset.module;
+        document.getElementById('module-detail').textContent = button.dataset.detail;
+        document.getElementById('module-progress').style.width = `${button.dataset.progress}%`;
+      }));
+
+      document.querySelectorAll('.catalog-tabs button').forEach(button => button.addEventListener('click', () => {
+        document.querySelectorAll('.catalog-tabs button').forEach(item => item.classList.toggle('active', item === button));
+        ['enrolled', 'available', 'completed'].forEach(key => document.getElementById(`catalog-${key}`).hidden = key !== button.dataset.catalog);
+        document.getElementById('course-search').value = '';
+        document.querySelectorAll('.course-card').forEach(card => card.hidden = false);
+      }));
+      document.getElementById('course-search').addEventListener('input', event => {
+        const query = event.target.value.trim().toLocaleLowerCase('pt-BR');
+        document.querySelectorAll('.filterable-courses:not([hidden]) .course-card').forEach(card => card.hidden = !card.dataset.course.toLocaleLowerCase('pt-BR').includes(query));
+      });
+      document.querySelectorAll('.enroll-action').forEach(button => button.addEventListener('click', () => {
+        button.textContent = 'Inscrição confirmada';
+        button.className = 'secondary';
+        button.disabled = true;
+        showToast('Curso adicionado aos matriculados nesta simulação.');
+      }));
+
+      document.getElementById('open-exit').addEventListener('click', event => {
+        document.getElementById('exit-stage').classList.add('active');
+        document.getElementById('exit-status').textContent = 'Janela aberta por 10 minutos';
+        event.currentTarget.textContent = 'Projetar QR';
+        showToast('Etapa de saída aberta na prévia.');
+      });
+      document.querySelectorAll('.row-action').forEach(button => button.addEventListener('click', () => {
+        button.textContent = 'Justificada';
+        button.classList.add('done');
+        const status = button.closest('tr').querySelector('.badge');
+        status.textContent = 'Justificada';
+        status.className = 'badge green';
+        showToast('Presença justificada nesta simulação.');
+      }));
+
+      function setAdaptiveRole(role) {
+        ['student', 'teacher', 'admin'].forEach(key => document.getElementById(`role-${key}`).hidden = key !== role);
+        document.querySelectorAll('.role-switch button').forEach(button => button.classList.toggle('active', button.dataset.role === role));
+        const sidebars = {
+          student: ['Hoje', 'Meus cursos', 'Desempenho', 'Certificados'],
+          teacher: ['Visão geral', 'Cursos e trilhas', 'Aulas', 'Alunos', 'Certificados', 'Relatórios'],
+          admin: ['Visão geral', 'Usuários e papéis', 'Configurações', 'Integridade e auditoria']
+        };
+        const sidebar = document.getElementById('adaptive-sidebar');
+        sidebar.innerHTML = `<p class="side-label">${role === 'student' ? 'Minha área' : role === 'teacher' ? 'Operação' : 'Administração'}</p>` + sidebars[role].map((label, index) => `<button class="side-link ${index === 0 ? 'active' : ''}">${label}</button>`).join('');
+      }
+      document.querySelectorAll('.role-switch button').forEach(button => button.addEventListener('click', () => setAdaptiveRole(button.dataset.role)));
+
+      renderCriteria(models[1].scores);
+    })();
+  </script>
+</body>
+</html>

@@ -55,6 +55,8 @@ MAIL_USERNAME=notificacoes@ourilandiadonorte.pa.leg.br
 MAIL_PASSWORD=senha_do_email
 MAIL_FROM_ADDRESS=notificacoes@ourilandiadonorte.pa.leg.br
 MAIL_FROM_NAME="Elegis - Câmara Municipal de Ourilândia do Norte"
+MAIL_SECURE=false
+MAIL_TLS_REJECT_UNAUTHORIZED=true
 ```
 
 ### 3. Subindo os Contêineres

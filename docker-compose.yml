@@ -93,6 +93,14 @@ services:
       BODY_LIMIT: ${BODY_LIMIT:-2mb}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
       UPLOAD_DIR: /app/uploads
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Elegis - Câmara Municipal de Ourilândia do Norte}
+      MAIL_SECURE: ${MAIL_SECURE:-false}
+      MAIL_TLS_REJECT_UNAUTHORIZED: ${MAIL_TLS_REJECT_UNAUTHORIZED:-true}
     volumes:
       - uploads:/app/uploads
       - ./docs:/app/docs:ro

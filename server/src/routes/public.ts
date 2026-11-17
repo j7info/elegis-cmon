@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db/pool.js';
+import { normalizeIdentifier } from '../lib/identifier.js';
 
 const router = Router();
 
@@ -12,11 +13,18 @@ router.post('/pre-register', async (req: Request, res: Response) => {
     return;
   }
 
+  const cleanCpf = normalizeIdentifier(cpf);
+  const cleanEmail = email?.trim().toLowerCase() || '';
+
   try {
     // Verificar se já existe (por CPF ou E-mail)
     const { rows: existing } = await pool.query(
-      'SELECT id, name, cpf, is_pre_registered, matricula FROM app_users WHERE cpf = $1 OR email = $2 LIMIT 1',
-      [cpf.trim(), email?.trim() || '']
+      `SELECT id, name, cpf, is_pre_registered, matricula
+       FROM app_users
+       WHERE regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = $1
+          OR ($2 <> '' AND LOWER(COALESCE(email, '')) = $2)
+       LIMIT 1`,
+      [cleanCpf, cleanEmail]
     );
 
     if (existing.length > 0) {
@@ -33,7 +41,7 @@ router.post('/pre-register', async (req: Request, res: Response) => {
     const { rows } = await pool.query(
       `INSERT INTO app_users (matricula, password_hash, name, email, cpf, cargo, departamento, orgao, status, is_pre_registered, must_change_password)
        VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, 'Ativo', TRUE, TRUE) RETURNING id, name, email, cpf, is_pre_registered`,
-      [dummyPassword, name.trim(), email?.trim() || null, cpf.trim(), cargo?.trim() || null, departamento?.trim() || null, orgao?.trim() || 'CMON']
+      [dummyPassword, name.trim(), cleanEmail || null, cleanCpf, cargo?.trim() || null, departamento?.trim() || null, orgao?.trim() || 'CMON']
     );
 
     res.status(201).json({ message: 'Pré-cadastro realizado com sucesso', user: rows[0] });

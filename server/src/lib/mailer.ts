@@ -1,23 +1,52 @@
 import nodemailer from 'nodemailer';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_HOST || 'mail.ourilandiadonorte.pa.leg.br',
-  port: parseInt(process.env.MAIL_PORT || '587'),
-  secure: false, // TLS via STARTTLS
-  auth: {
-    user: process.env.MAIL_USERNAME || 'notificacoes@ourilandiadonorte.pa.leg.br',
-    pass: process.env.MAIL_PASSWORD || 'master@7Camara',
-  },
-  tls: {
-    rejectUnauthorized: false
+type MailEnvironment = Partial<Pick<NodeJS.ProcessEnv,
+  | 'MAIL_HOST'
+  | 'MAIL_PORT'
+  | 'MAIL_USERNAME'
+  | 'MAIL_PASSWORD'
+  | 'MAIL_FROM_ADDRESS'
+  | 'MAIL_FROM_NAME'
+  | 'MAIL_SECURE'
+  | 'MAIL_TLS_REJECT_UNAUTHORIZED'
+>>;
+
+export const resolveMailConfig = (env: MailEnvironment = process.env) => {
+  const host = env.MAIL_HOST?.trim();
+  const user = env.MAIL_USERNAME?.trim();
+  const pass = env.MAIL_PASSWORD;
+
+  if (!host || !user || !pass) {
+    throw new Error('Configuração de e-mail incompleta');
   }
-});
+
+  const port = Number.parseInt(env.MAIL_PORT || '587', 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('MAIL_PORT inválida');
+  }
+
+  return {
+    transport: {
+      host,
+      port,
+      secure: env.MAIL_SECURE === 'true' || (!env.MAIL_SECURE && port === 465),
+      auth: { user, pass },
+      tls: {
+        rejectUnauthorized: env.MAIL_TLS_REJECT_UNAUTHORIZED !== 'false',
+      },
+    },
+    fromAddress: env.MAIL_FROM_ADDRESS?.trim() || user,
+    fromName: env.MAIL_FROM_NAME?.trim() || 'Elegis - Câmara Municipal de Ourilândia do Norte',
+  };
+};
 
 export const sendRecoveryEmail = async (to: string, token: string, baseUrl: string) => {
+  const config = resolveMailConfig();
+  const transporter = nodemailer.createTransport(config.transport);
   const resetLink = `${baseUrl}/reset-password?token=${token}`;
   
   const mailOptions = {
-    from: `"${process.env.MAIL_FROM_NAME || 'Elegis - Câmara Municipal de Ourilândia do Norte'}" <${process.env.MAIL_FROM_ADDRESS || 'notificacoes@ourilandiadonorte.pa.leg.br'}>`,
+    from: `"${config.fromName}" <${config.fromAddress}>`,
     to,
     subject: 'Recuperação de Senha - Sistema de Certificação e Presença',
     html: `

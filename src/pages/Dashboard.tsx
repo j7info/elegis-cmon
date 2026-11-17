@@ -1,16 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth, AuthUser } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { Link } from 'react-router-dom';
-import { Plus, GraduationCap, ChevronRight, X, Loader2, Copy, UserPlus, CheckCircle2, Bell } from 'lucide-react';
+import { GraduationCap, X, Loader2, Copy } from 'lucide-react';
 import clsx from 'clsx';
+import {
+  StaffDashboardView,
+  StudentDashboardView,
+  type CourseRecord,
+} from '../components/dashboard/DashboardViews';
+import type { CoursePerformanceSummary } from '../lib/dashboardModel';
 
 const canCreateCourse = (u: AuthUser | null) =>
   u?.system_role === 'ADMIN' || u?.system_role === 'COORDENADOR' || u?.system_role === 'PROFESSOR';
 
 export function Dashboard() {
   const { user, loading } = useAuth();
-  const [courses, setCourses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<CourseRecord[]>([]);
+  const [performance, setPerformance] = useState<CoursePerformanceSummary[]>([]);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -29,19 +37,39 @@ export function Dashboard() {
 
   const loadData = async () => {
     if (!user) return;
+    setDataLoading(true);
+    setLoadError(null);
     try {
-      const coursesEndpoint = user.system_role === 'ALUNO' ? '/courses/enrolled' : '/courses';
-      const requests: Promise<any>[] = [api.get(coursesEndpoint)];
-      if (canCreateCourse(user)) {
-        requests.push(api.get('/users'));
+      if (user.system_role === 'ALUNO') {
+        const [coursesResult, performanceResult] = await Promise.allSettled([
+          api.get<CourseRecord[]>('/courses/enrolled'),
+          api.get<{ courses: CoursePerformanceSummary[] }>('/me/performance'),
+        ]);
+
+        if (coursesResult.status === 'rejected') throw coursesResult.reason;
+        setCourses(coursesResult.value);
+
+        if (performanceResult.status === 'fulfilled') {
+          setPerformance(performanceResult.value.courses || []);
+        } else {
+          console.error('Error loading performance summary:', performanceResult.reason);
+          setPerformance([]);
+        }
+      } else {
+        const [coursesResult, usersResult] = await Promise.allSettled([
+          api.get<CourseRecord[]>('/courses'),
+          canCreateCourse(user) ? api.get<any[]>('/users') : Promise.resolve([]),
+        ]);
+
+        if (coursesResult.status === 'rejected') throw coursesResult.reason;
+        setCourses(coursesResult.value);
+        if (usersResult.status === 'fulfilled') setAllUsers(usersResult.value);
       }
-      const results = await Promise.all(requests);
-      setCourses(results[0]);
-      if (results[1] !== undefined) {
-        setAllUsers(results[1]);
-      }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading dashboard data:', err);
+      setLoadError(err?.message || 'Não foi possível carregar o painel.');
+    } finally {
+      setDataLoading(false);
     }
   };
 
@@ -150,175 +178,36 @@ export function Dashboard() {
     );
   }
 
-  const showCreateButton = canCreateCourse(user);
   const isAluno = user.system_role === 'ALUNO';
-  const enrolledCourses = isAluno ? courses.filter(c => c.enrollment_status !== 'available') : courses;
-  const availableCourses = isAluno ? courses.filter(c => c.enrollment_status === 'available') : [];
-  const renderCourseCard = (c: any) => {
-    const status = !c.start_date ? null : c.end_date && new Date(c.end_date) < new Date() ? 'completed' : new Date(c.start_date) > new Date() ? 'upcoming' : 'active';
-    const isAvailable = isAluno && c.enrollment_status === 'available';
-    const pendingCount = Number(c.pending_class_count || 0);
-    const latestPendingClass = c.latest_pending_class;
-    const hasPendingClasses = isAluno && !isAvailable && pendingCount > 0;
-    const pendingLabel = pendingCount === 1 ? '1 aula pendente' : `${pendingCount} aulas pendentes`;
-    const pendingTypeLabel = latestPendingClass?.type === 'online'
-      ? latestPendingClass?.online_content_type === 'video' ? 'Vídeo novo para assistir' : 'Aula online nova'
-      : latestPendingClass?.type === 'practical'
-        ? 'Aula prática pendente'
-        : 'Aula presencial pendente';
-    const card = (
-      <div className={clsx(
-        "bg-white p-6 rounded-xl shadow-sm border hover:shadow-md transition-all h-full flex flex-col",
-        hasPendingClasses ? "border-amber-200 hover:border-amber-300" : isAvailable ? "border-blue-100 hover:border-blue-300" : "border-gray-100 hover:border-teal-300"
-      )}>
-        <div className="flex justify-between items-start mb-2">
-          <div className={clsx("p-2 rounded-lg", hasPendingClasses ? "bg-amber-50 text-amber-600" : isAvailable ? "bg-blue-50 text-blue-600" : "bg-teal-50 text-teal-600")}>
-            {hasPendingClasses ? <Bell className="w-5 h-5" /> : <GraduationCap className="w-5 h-5" />}
-          </div>
-          <div className="flex gap-2 flex-wrap justify-end">
-            {hasPendingClasses && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-amber-100 text-amber-700">
-                Nova aula
-              </span>
-            )}
-            {isAvailable && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-700">
-                Disponível
-              </span>
-            )}
-            {status && (
-              <span className={clsx("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase", {
-                "bg-green-100 text-green-700": status === 'active',
-                "bg-amber-100 text-amber-700": status === 'upcoming',
-                "bg-gray-100 text-gray-500": status === 'completed',
-              })}>
-                {status === 'active' ? 'Em andamento' : status === 'upcoming' ? 'Previsto' : 'Concluído'}
-              </span>
-            )}
-          </div>
-        </div>
-        <h3 className={clsx("text-xl font-semibold text-gray-900 mb-1 truncate transition-colors", !isAvailable && "group-hover:text-teal-600")}>{c.title}</h3>
-        {c.description && <p className="text-sm text-gray-500 line-clamp-2 mb-4">{c.description}</p>}
-        {hasPendingClasses && (
-          <div className="mb-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            <div className="flex items-center gap-2 font-semibold">
-              <Bell className="w-4 h-4" />
-              {pendingLabel}
-            </div>
-            <p className="mt-1 text-xs text-amber-700 line-clamp-1">
-              {latestPendingClass?.title ? `${pendingTypeLabel}: ${latestPendingClass.title}` : pendingTypeLabel}
-            </p>
-          </div>
-        )}
-        {c.parent_course_id && <p className="text-xs text-gray-400 mb-2">Reaproveitado de outro curso</p>}
-        <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-50">
-          {isAvailable ? (
-            <button
-              type="button"
-              onClick={() => handleEnroll(c.id)}
-              disabled={enrollingCourseId === c.id}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              {enrollingCourseId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-              Inscrever-se
-            </button>
-          ) : (
-            <div className="text-teal-600 text-sm font-medium flex items-center gap-1 ml-auto">
-              Acessar Curso
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </div>
-          )}
-        </div>
-      </div>
-    );
-
-    if (isAvailable) {
-      return <div key={c.id} className="block">{card}</div>;
-    }
-
-    return (
-      <Link key={c.id} to={`/course/${c.id}`} className="block group">
-        {card}
-      </Link>
-    );
-  };
 
   return (
     <div className="space-y-8">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium text-gray-900">Seus Cursos</h2>
-          {showCreateButton && (
-            <button
-              type="button"
-              onClick={() => {
-                setSubmitError(null);
-                setIsModalOpen(true);
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Curso
-            </button>
-          )}
+      {dataLoading ? (
+        <div className="flex min-h-64 items-center justify-center text-slate-500">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin text-teal-700" /> Carregando painel...
         </div>
-
-        {isAluno && enrollError && (
-          <div className="px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm">
-            {enrollError}
-          </div>
-        )}
-
-        {courses.length === 0 ? (
-          <div className="text-center p-12 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500">
-            {isAluno
-              ? 'Nenhum curso matriculado ou disponível para inscrição no momento.'
-              : 'Você ainda não tem cursos. Clique em "Novo Curso" para criar.'}
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {isAluno ? (
-              <>
-                <section className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-teal-600" />
-                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Matriculados</h3>
-                  </div>
-                  {enrolledCourses.length === 0 ? (
-                    <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl p-6">
-                      Você ainda não está matriculado em nenhum curso.
-                    </div>
-                  ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {enrolledCourses.map(renderCourseCard)}
-                    </div>
-                  )}
-                </section>
-
-                <section className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <UserPlus className="w-4 h-4 text-blue-600" />
-                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Disponíveis para inscrição</h3>
-                  </div>
-                  {availableCourses.length === 0 ? (
-                    <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl p-6">
-                      Nenhum curso disponível para inscrição agora.
-                    </div>
-                  ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {availableCourses.map(renderCourseCard)}
-                    </div>
-                  )}
-                </section>
-              </>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {courses.map(renderCourseCard)}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      ) : isAluno ? (
+        <StudentDashboardView
+          userName={user.name}
+          courses={courses}
+          performance={performance}
+          enrollingCourseId={enrollingCourseId}
+          enrollError={enrollError}
+          loadError={loadError}
+          onEnroll={handleEnroll}
+        />
+      ) : (
+        <StaffDashboardView
+          userName={user.name}
+          courses={courses}
+          userCount={allUsers.length}
+          loadError={loadError}
+          onCreate={() => {
+            setSubmitError(null);
+            setIsModalOpen(true);
+          }}
+        />
+      )}
 
       {isModalOpen && (
         <div
@@ -326,7 +215,7 @@ export function Dashboard() {
           onClick={closeModal}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden"
+            className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">

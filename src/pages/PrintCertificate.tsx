@@ -1,24 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Loader2, Printer } from 'lucide-react';
+import { CheckCircle2, Loader2, Printer } from 'lucide-react';
 import { format } from 'date-fns';
-import ptBR from 'date-fns/locale/pt-BR';
+import { ptBR } from 'date-fns/locale';
 import { useSettings } from '../lib/useSettings';
 import { QRCodeSVG } from 'qrcode.react';
+import { groupCertificateClasses } from '../lib/certificateModel';
 
 function formatCertificateText(configText: string, studentInfo: any, course: any) {
   return configText
     .replace(/{{ALUNO}}/g, studentInfo.full_name || '(Nome Indisponível)')
     .replace(/{{CURSO}}/g, course.title)
     .replace(/{{CARGA_HORARIA}}/g, String(course.duration_hours || 0))
-    .replace(/{{PONTUACAO}}/g, String(studentInfo.points))
-    .replace(/{{PERCENTUAL}}/g, String(studentInfo.percentage))
+    .replace(/{{PONTUACAO}}/g, String(studentInfo.points ?? 0))
+    .replace(/{{PERCENTUAL}}/g, String(studentInfo.percentage ?? 0))
     .replace(/{{AVALIACAO}}/g, String(studentInfo.evaluation_score ?? 0))
     .replace(/{{TOTAL}}/g, String((studentInfo.points || 0) + (studentInfo.evaluation_score || 0)));
 }
 
-function CertificatePages({ course, classesList, settings, studentInfo }: { course: any; classesList: any[]; settings: any; studentInfo: any }) {
+function CertificatePages({ course, classesList, settings, studentInfo }: { key?: React.Key; course: any; classesList: any[]; settings: any; studentInfo: any }) {
   const certConfig = course.certificate_config
     ? (typeof course.certificate_config === 'string' ? JSON.parse(course.certificate_config) : course.certificate_config)
     : {};
@@ -26,16 +27,8 @@ function CertificatePages({ course, classesList, settings, studentInfo }: { cour
   const configText = certConfig.text || 'Certificamos que {{ALUNO}} concluiu com êxito o curso de {{CURSO}} com carga horária de {{CARGA_HORARIA}}h, alcançando a marca de {{PONTUACAO}} pontos e {{PERCENTUAL}}% de presença.';
   const formattedText = formatCertificateText(configText, studentInfo, course);
   const signatures: any[] = certConfig.signatures || [];
-  const groupedClasses = classesList.reduce((groups: Array<{ title: string; classes: any[] }>, classItem: any) => {
-    const title = classItem.is_subcourse ? (classItem.course_title || 'Subcurso') : 'Conteúdo principal';
-    let group = groups.find(g => g.title === title);
-    if (!group) {
-      group = { title, classes: [] };
-      groups.push(group);
-    }
-    group.classes.push(classItem);
-    return groups;
-  }, []);
+  const groupedClasses = groupCertificateClasses(classesList);
+  const compactContent = classesList.length > 16;
 
   return (
     <>
@@ -85,9 +78,9 @@ function CertificatePages({ course, classesList, settings, studentInfo }: { cour
               <h3 className="text-sm font-bold uppercase tracking-wider text-teal-800 mb-3">
                 {groupIndex + 1}. {group.title}
               </h3>
-              <div className="grid grid-cols-2 gap-x-16 gap-y-3">
+              <div className={compactContent ? 'grid grid-cols-3 gap-x-8 gap-y-2' : 'grid grid-cols-2 gap-x-16 gap-y-3'}>
                 {group.classes.map((c: any, i: number) => (
-                  <div key={c.id} className="text-sm text-gray-800 break-inside-avoid shadow-sm border border-gray-100 rounded-lg p-3">
+                  <div key={c.id} className={compactContent ? 'break-inside-avoid rounded-lg border border-gray-100 p-2 text-xs text-gray-800' : 'break-inside-avoid rounded-lg border border-gray-100 p-3 text-sm text-gray-800 shadow-sm'}>
                     <span className="font-bold block mb-1 text-gray-900">{i + 1}. {c.title}</span>
                     {c.description && <span className="text-gray-600 block line-clamp-2">{c.description}</span>}
                   </div>
@@ -110,6 +103,8 @@ export function PrintCertificate() {
   const [studentInfos, setStudentInfos] = useState<any[]>([]);
   const [classesList, setClassesList] = useState<any[]>([]);
   const [error, setError] = useState('');
+  const [preparedCount, setPreparedCount] = useState(0);
+  const [preparingTotal, setPreparingTotal] = useState(0);
 
   useEffect(() => {
     async function loadData() {
@@ -136,7 +131,10 @@ export function PrintCertificate() {
           return;
         }
 
-        const issuedStudents = await Promise.all(selectedStudents.map(async (student: any) => {
+        setPreparingTotal(selectedStudents.length);
+        setPreparedCount(0);
+        const issuedStudents = [];
+        for (const student of selectedStudents) {
           const cert = await api.post('/certificates', {
             course_id: parseInt(courseId),
             student_id: student.identifier,
@@ -147,12 +145,13 @@ export function PrintCertificate() {
             evaluation_score: student.evaluation_score || 0,
           });
 
-          return {
+          issuedStudents.push({
             ...student,
             token: cert.token,
             issuedAt: cert.issued_at,
-          };
-        }));
+          });
+          setPreparedCount(issuedStudents.length);
+        }
 
         setStudentInfos(issuedStudents);
       } catch (e) {
@@ -165,16 +164,35 @@ export function PrintCertificate() {
     loadData();
   }, [courseId, studentId]);
 
-  if (loading) return <div className="flex justify-center items-center h-screen bg-gray-50"><Loader2 className="w-10 h-10 animate-spin text-gray-500" /></div>;
+  if (loading) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50 p-4">
+      <div className="w-full max-w-sm text-center">
+        <Loader2 className="mx-auto h-9 w-9 animate-spin text-teal-600" />
+        <h1 className="mt-4 text-lg font-bold text-slate-900">Preparando certificados</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {preparingTotal > 1 ? `${preparedCount} de ${preparingTotal} certificados processados` : 'Carregando dados para impressão'}
+        </p>
+        {preparingTotal > 1 && (
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full rounded-full bg-teal-600 transition-all" style={{ width: `${Math.round((preparedCount / preparingTotal) * 100)}%` }} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
   if (!course || studentInfos.length === 0) return <div className="text-center p-8">{error || 'Erro ao carregar dados.'}</div>;
 
   return (
     <div className="min-h-screen bg-gray-200 py-8 print:py-0 print:bg-white flex flex-col items-center overflow-x-auto">
       <div className="min-w-[297mm] flex flex-col items-center">
-        <div className="mb-8 flex gap-4 no-print w-full justify-end">
+        <div className="no-print mb-8 flex w-full items-center justify-between gap-4 rounded-lg bg-white px-5 py-4 shadow-sm">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-bold text-slate-900"><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Certificados prontos</p>
+            <p className="mt-1 text-xs text-slate-500">{studentInfos.length} certificado(s), com frente e conteúdo programático no verso.</p>
+          </div>
           <button
             onClick={() => window.print()}
-            className="flex items-center gap-2 px-6 py-2 bg-teal-600 text-white rounded-lg font-bold shadow hover:bg-teal-700 transition"
+            className="flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700"
           >
             <Printer className="w-5 h-5" /> {studentInfos.length > 1 ? `Imprimir ${studentInfos.length} certificados` : 'Imprimir / Salvar PDF'}
           </button>
